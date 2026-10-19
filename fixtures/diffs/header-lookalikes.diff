@@ -1,0 +1,5 @@
+--- a/lookalike.txt
++++ b/lookalike.txt
+@@ -1,2 +1,2 @@
+-old
++--- a/not-a-header

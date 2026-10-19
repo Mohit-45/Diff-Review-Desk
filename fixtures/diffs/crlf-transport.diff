@@ -1,0 +1,5 @@
+--- a/crlf.txt
++++ b/crlf.txt
+@@ -1 +1 @@
+-old
++new

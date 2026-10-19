@@ -1,0 +1,32 @@
+@layer forced-colors {
+  @media (forced-colors: active) {
+    button[aria-pressed='true'] {
+      background: Highlight;
+      color: HighlightText;
+    }
+
+    .hunk[aria-current='true'],
+    .file-row[aria-current='true'] {
+      border-inline-start: 4px solid Highlight;
+    }
+
+    .progress-fill {
+      background: Highlight;
+    }
+
+    .progress-track {
+      border: 1px solid CanvasText;
+      background: Canvas;
+    }
+
+    .chip,
+    .banner {
+      border: 1px solid CanvasText;
+    }
+
+    :focus-visible {
+      outline: 2px solid Highlight;
+      box-shadow: none;
+    }
+  }
+}

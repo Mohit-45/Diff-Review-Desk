@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "fixtures": [
+    { "slug": "empty", "file": "empty.diff", "tier": "A", "expected": { "error": "empty" } },
+    {
+      "slug": "not-a-diff",
+      "file": "not-a-diff.diff",
+      "tier": "A",
+      "expected": { "error": "not-a-diff" }
+    },
+    {
+      "slug": "binary-input",
+      "file": "binary-input.diff",
+      "tier": "A",
+      "expected": { "error": "binary-input" }
+    },
+    {
+      "slug": "binary-file",
+      "file": "binary-file.diff",
+      "tier": "A",
+      "expected": { "files": 1, "meta": "binary" }
+    },
+    {
+      "slug": "invalid-utf8",
+      "file": "invalid-utf8.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "warnings": ["invalid-utf8"] }
+    },
+    {
+      "slug": "crlf-transport",
+      "file": "crlf-transport.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1 }
+    },
+    {
+      "slug": "eof-newline",
+      "file": "eof-newline.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "added": 1, "removed": 1 }
+    },
+    {
+      "slug": "no-eol",
+      "file": "no-eol.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "noEol": true }
+    },
+    {
+      "slug": "preamble-trailer",
+      "file": "preamble-trailer.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1 }
+    },
+    {
+      "slug": "hunk-headers",
+      "file": "hunk-headers.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1 }
+    },
+    {
+      "slug": "zero-context",
+      "file": "zero-context.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "added": 1, "removed": 0 }
+    },
+    {
+      "slug": "truncated",
+      "file": "truncated.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "truncated": true }
+    },
+    {
+      "slug": "header-lookalikes",
+      "file": "header-lookalikes.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1 }
+    },
+    {
+      "slug": "concatenated",
+      "file": "concatenated.diff",
+      "tier": "A",
+      "expected": { "files": 2, "hunks": 2 }
+    },
+    {
+      "slug": "quoted-paths",
+      "file": "quoted-paths.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1 }
+    },
+    {
+      "slug": "dev-null",
+      "file": "dev-null.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "status": "added" }
+    },
+    {
+      "slug": "new-delete",
+      "file": "new-delete.diff",
+      "tier": "A",
+      "expected": { "files": 2, "hunks": 2 }
+    },
+    {
+      "slug": "rename-copy",
+      "file": "rename-copy.diff",
+      "tier": "A",
+      "expected": { "files": 2, "hunks": 2 }
+    },
+    {
+      "slug": "mode-type",
+      "file": "mode-type.diff",
+      "tier": "A",
+      "expected": { "files": 1, "meta": true }
+    },
+    {
+      "slug": "unicode",
+      "file": "unicode.diff",
+      "tier": "A",
+      "expected": { "files": 1, "hunks": 1, "warnings": ["suspicious-chars"] }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+--- a/one.txt
++++ b/one.txt
+@@ -1 +1 @@
+-one
++two
+--- a/two.txt
++++ b/two.txt
+@@ -1 +1 @@
+-three
++four

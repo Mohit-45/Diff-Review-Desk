@@ -1,0 +1,13 @@
+diff --git a/old.txt b/new.txt
+similarity index 87%
+rename from old.txt
+rename to new.txt
+--- a/old.txt
++++ b/new.txt
+@@ -1 +1 @@
+-old
++new
+diff --git a/source.txt b/copy.txt
+similarity index 100%
+copy from source.txt
+copy to copy.txt

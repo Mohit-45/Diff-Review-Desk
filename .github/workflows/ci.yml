@@ -1,0 +1,42 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t diff-review-desk .
+      - run: docker run --rm --network none diff-review-desk npm test
+      - run: |
+          docker run -d --name diff-review-desk-server diff-review-desk
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/ | grep -q 'id="root"'; then
+              docker rm -f diff-review-desk-server
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs diff-review-desk-server
+          docker rm -f diff-review-desk-server
+          exit 1

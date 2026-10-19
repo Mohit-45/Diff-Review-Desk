@@ -1,0 +1,11 @@
+commit 0123456789012345678901234567890123456789
+Author: Example <example@example.invalid>
+
+ src/example.ts | 2 +-
+--- a/src/example.ts
++++ b/src/example.ts
+@@ -1 +1 @@
+-old
++new
+-- 
+2.50.1

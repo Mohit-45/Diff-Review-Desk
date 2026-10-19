@@ -1,0 +1,36 @@
+@layer tokens {
+  :root {
+    color-scheme: light dark;
+    --bg: light-dark(#ffffff, #0e1116);
+    --bg-subtle: light-dark(#f7f8fa, #151a21);
+    --bg-muted: light-dark(#eef0f3, #1c222b);
+    --border: light-dark(#e1e4e9, #2b323d);
+    --border-strong: light-dark(#7a8392, #6b7686);
+    --track: light-dark(#cbd0d8, #2b323d);
+    --fg: light-dark(#161a22, #e6eaf0);
+    --fg-muted: light-dark(#525a67, #a9b2bf);
+    --fg-subtle: light-dark(#5f6773, #8b95a5);
+    --on-solid: light-dark(#ffffff, #0e1116);
+    --accent: light-dark(#1d4ed8, #7aa7ff);
+    --accent-hover: light-dark(#1e40af, #9dbdff);
+    --accent-subtle: light-dark(#eaf0fe, #17243f);
+    --add-fg: light-dark(#166534, #5fd38d);
+    --add-bg: light-dark(#e6f6ea, #12261b);
+    --add-gutter: light-dark(#ccebd4, #1b3d2a);
+    --remove-fg: light-dark(#b42318, #ff8a80);
+    --remove-bg: light-dark(#fdebea, #2a1517);
+    --remove-gutter: light-dark(#f8cfcb, #4a2024);
+    --warning-fg: light-dark(#8a5300, #f0b84a);
+    --warning-bg: light-dark(#fff4d6, #2b2210);
+    --danger: light-dark(#b42318, #ff8a80);
+    --danger-hover: light-dark(#912018, #ffa8a0);
+  }
+
+  :root[data-theme='light'] {
+    color-scheme: light;
+  }
+
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+  }
+}

@@ -1,0 +1,5 @@
+--- a/unicode.txt
++++ b/unicode.txt
+@@ -1 +1 @@
+-plain
++hidden {{U+202E}} marker

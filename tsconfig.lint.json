@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "noEmit": true,
+    "types": ["vite/client", "node", "vitest/globals"]
+  },
+  "include": ["src", "tests", "scripts", "vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+}
