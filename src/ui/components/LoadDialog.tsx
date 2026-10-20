@@ -1,16 +1,29 @@
 import {
   useEffect,
-  useId,
   useRef,
   useState,
   type ChangeEvent,
-  type DragEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
+import type { PendingChoice, PendingLoad } from '../../app/loadPlan';
 import type { ParseError } from '../../core/types';
-import { LIMITS } from '../../core/limits';
-import { BUILT_IN_SAMPLES, type BuiltInSample } from '../../samples';
+import type { BuiltInSample } from '../../samples';
+import { DIALOG_TITLE_IDS } from '../dialogIds';
+import { DocumentPasteListener } from './DocumentPasteListener';
+import { DropZone } from './DropZone';
+import { ErrorPanel } from './ErrorPanel';
+import { LoadDecision } from './LoadDecision';
+import {
+  emptyError,
+  fileError,
+  isBlank,
+  loadedStatus,
+  unreadableFileError,
+} from './intakeValidation';
+import { appMessages } from '../messages/app';
 import { SafeText } from './SafeText';
+import { SampleButtons } from './SampleButtons';
 
 export type LoadFileCallback = (file: File, ignoredFileCount?: number) => void;
 
@@ -27,6 +40,8 @@ export type IntakeControlsProps = {
   readonly idPrefix: string;
   readonly enableDocumentPaste?: boolean;
   readonly showPrivacyLine?: boolean;
+  /** Present while the error on show is a file that could not be read: reads that file again. */
+  readonly onRetry?: (() => void) | null;
 };
 
 export type LoadDialogProps = {
@@ -35,98 +50,23 @@ export type LoadDialogProps = {
   readonly error?: ParseError | null;
   readonly status?: string;
   readonly loading?: boolean;
+  /**
+   * Render a labelled section instead of a native dialog, for a parent that
+   * already owns the `<dialog>` element. Nesting two dialogs gives assistive
+   * technology a dialog inside a dialog.
+   */
+  readonly embedded?: boolean;
   readonly onClose: () => void;
   readonly onLoadText: (text: string) => void;
   readonly onLoadFile: LoadFileCallback;
   readonly onLoadSample: (sample: BuiltInSample) => void;
   readonly onError?: (error: ParseError) => void;
+  readonly onRetry?: (() => void) | null;
+  /** Step 2: a parsed diff that waits for the user to pick what happens to the open review. */
+  readonly pending?: PendingLoad | null;
+  readonly onResolvePending?: (choice: PendingChoice) => void;
+  readonly onCancelPending?: () => void;
 };
-
-function emptyError(detail = 'Paste a unified diff or try a sample.'): ParseError {
-  return {
-    code: 'empty',
-    title: 'Nothing to review',
-    detail,
-    hint: null,
-    suggestion: 'Paste a unified diff or try a sample.',
-  };
-}
-
-function tooLargeError(size: number): ParseError {
-  return {
-    code: 'too-large',
-    title: 'This diff is too large',
-    detail: `The input is ${size} bytes; the limit is ${LIMITS.maxInputBytes} bytes.`,
-    hint: 'generic',
-    suggestion: 'Review a narrower change with `git diff -- src/`.',
-  };
-}
-
-function unreadableFileError(): ParseError {
-  return {
-    code: 'internal',
-    title: "That file isn't text",
-    detail: 'The dropped item could not be read as a text diff.',
-    hint: 'generic',
-    suggestion: 'Choose a text diff or paste the diff text.',
-  };
-}
-
-function fileError(file: File): ParseError | null {
-  if (file.size === 0) {
-    return emptyError(`The selected file ${file.name || 'this file'} is empty.`);
-  }
-  if (file.size > LIMITS.maxInputBytes) {
-    return tooLargeError(file.size);
-  }
-  return null;
-}
-
-function isBlank(value: string): boolean {
-  return /^\s*$/u.test(value);
-}
-
-export function ErrorPanel({
-  error,
-  onLoadSample,
-}: {
-  readonly error: ParseError;
-  readonly onLoadSample: (sample: BuiltInSample) => void;
-}) {
-  const headingId = useId();
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, [error]);
-  return (
-    <section className="intake-error" aria-labelledby={headingId} tabIndex={-1}>
-      <h3 id={headingId} ref={headingRef} tabIndex={-1}>
-        <SafeText>{error.title}</SafeText>
-      </h3>
-      <p>
-        <SafeText>{error.detail}</SafeText>
-      </p>
-      {error.suggestion !== null && (
-        <textarea
-          aria-label="Suggested fix command"
-          readOnly
-          rows={2}
-          value={error.suggestion}
-          spellCheck={false}
-        />
-      )}
-      <button
-        type="button"
-        className="button button-secondary"
-        onClick={() => {
-          onLoadSample(BUILT_IN_SAMPLES[0] as BuiltInSample);
-        }}
-      >
-        Load sample
-      </button>
-    </section>
-  );
-}
 
 export function IntakeControls({
   value,
@@ -141,15 +81,15 @@ export function IntakeControls({
   idPrefix,
   enableDocumentPaste = false,
   showPrivacyLine = false,
+  onRetry = null,
 }: IntakeControlsProps) {
   const [localError, setLocalError] = useState<ParseError | null>(null);
   const [localStatus, setLocalStatus] = useState('');
-  const [dragging, setDragging] = useState(false);
   const pickerRef = useRef<HTMLInputElement>(null);
   const textareaId = `${idPrefix}-input`;
-  const dropId = `${idPrefix}-drop-zone`;
   const displayedError = error ?? localError;
-  const displayedStatus = status ?? localStatus;
+  // The parse itself blocks the page, so this line is what stays on screen while it runs.
+  const displayedStatus = loading ? appMessages.reading : (status ?? localStatus);
 
   function reportError(nextError: ParseError): void {
     setLocalError(nextError);
@@ -167,18 +107,14 @@ export function IntakeControls({
     onLoadText(value);
   }
 
-  function handleFile(file: File, ignoredFileCount = 0): void {
+  function handleFile(file: File, ignoredFileCount: number): void {
     const validation = fileError(file);
     if (validation !== null) {
       reportError(validation);
       return;
     }
     setLocalError(null);
-    setLocalStatus(
-      ignoredFileCount > 0
-        ? `Loaded ${file.name || 'the selected file'}. Ignored ${ignoredFileCount} other files.`
-        : `Loaded ${file.name || 'the selected file'}.`,
-    );
+    setLocalStatus(loadedStatus(file, ignoredFileCount));
     onLoadFile(file, ignoredFileCount);
   }
 
@@ -191,18 +127,6 @@ export function IntakeControls({
       return;
     }
     handleFile(first, ignoredFileCount);
-  }
-
-  function handleDrop(event: DragEvent<HTMLDivElement>): void {
-    event.preventDefault();
-    setDragging(false);
-    const files = event.dataTransfer?.files;
-    const first = files?.[0];
-    if (first === undefined) {
-      reportError(unreadableFileError());
-      return;
-    }
-    handleFile(first, Math.max(0, (files?.length ?? 1) - 1));
   }
 
   function handleTextKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -265,53 +189,24 @@ export function IntakeControls({
           hidden
         />
       </div>
-      <div
-        id={dropId}
-        className="drop-zone"
-        aria-label="Drop a unified diff"
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setDragging(true);
+      <DropZone
+        id={`${idPrefix}-drop-zone`}
+        onFile={handleFile}
+        onUnreadable={() => {
+          reportError(unreadableFileError());
         }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(event) => {
-          event.preventDefault();
-          setDragging(false);
-        }}
-        onDrop={handleDrop}
-        data-dragging={dragging ? 'true' : undefined}
-      >
-        <strong>{dragging ? 'Release to load the diff' : 'Drop a diff here'}</strong>
-        <span>or choose a text file from your device.</span>
-      </div>
+      />
       {showPrivacyLine && (
         <p className="privacy-line">
-          <SafeText>
-            Private by design. Your diff, comments and decisions never leave this browser. This page
-            makes no network requests. Diff text is kept in this tab&apos;s session storage.
-            Decisions and comments are saved in this browser.
-          </SafeText>
+          Private by design. Your diff, comments and decisions never leave this browser. This page
+          makes no network requests. Diff text is kept in this tab&apos;s session storage. Decisions
+          and comments are saved in this browser.
         </p>
       )}
-      <div className="button-row sample-row" aria-label="Built-in samples">
-        {BUILT_IN_SAMPLES.map((sample) => (
-          <button
-            key={sample.id}
-            type="button"
-            className="button button-secondary"
-            onClick={() => {
-              loadSample(sample);
-            }}
-            disabled={loading}
-          >
-            <SafeText>{sample.title}</SafeText>
-          </button>
-        ))}
-      </div>
-      {displayedError !== null && <ErrorPanel error={displayedError} onLoadSample={loadSample} />}
+      <SampleButtons disabled={loading} onLoadSample={loadSample} />
+      {displayedError !== null && (
+        <ErrorPanel error={displayedError} onLoadSample={loadSample} onRetry={onRetry} />
+      )}
       <p className="status-line" aria-live="polite">
         <SafeText>{displayedStatus}</SafeText>
       </p>
@@ -329,60 +224,31 @@ export function IntakeControls({
   );
 }
 
-function DocumentPasteListener({
-  disabled,
-  onLoadText,
-  onError,
+function DialogFrame({
+  embedded,
+  labelId,
+  loading,
+  children,
 }: {
-  readonly disabled: boolean;
-  readonly onLoadText: (text: string) => void;
-  readonly onError: (error: ParseError) => void;
+  readonly embedded: boolean;
+  readonly labelId: string;
+  readonly loading: boolean;
+  readonly children: ReactNode;
 }) {
-  // Kept as a component so the landing screen can opt into document paste
-  // without making a load dialog intercept pastes intended for its textarea.
-  const listener = (event: ClipboardEvent) => {
-    if (disabled) {
-      return;
-    }
-    const target = event.target;
-    if (target instanceof HTMLElement && target.closest('textarea, input, button') !== null) {
-      return;
-    }
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    event.preventDefault();
-    if (isBlank(text)) {
-      onError({
-        code: 'empty',
-        title: 'Clipboard has no text',
-        detail: 'Paste plain text from a unified diff, or choose a file.',
-        hint: null,
-        suggestion: 'Paste a unified diff or try a sample.',
-      });
-      return;
-    }
-    onLoadText(text);
-  };
-
-  // The listener is registered by the parent effect below. This small helper
-  // returns no DOM and keeps the input surface itself declarative.
-  useDocumentListener(listener);
-  return null;
-}
-
-function useDocumentListener(listener: (event: ClipboardEvent) => void): void {
-  useEffect(() => {
-    const preventWindowDrop = (event: globalThis.DragEvent) => {
-      event.preventDefault();
-    };
-    document.addEventListener('paste', listener);
-    window.addEventListener('dragover', preventWindowDrop);
-    window.addEventListener('drop', preventWindowDrop);
-    return () => {
-      document.removeEventListener('paste', listener);
-      window.removeEventListener('dragover', preventWindowDrop);
-      window.removeEventListener('drop', preventWindowDrop);
-    };
-  }, [listener]);
+  if (embedded) {
+    // A plain block: the parent's dialog carries the name, and a second labelled region here
+    // would add a landmark inside it.
+    return (
+      <div className="load-dialog" aria-busy={loading || undefined}>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <dialog open aria-labelledby={labelId} aria-busy={loading || undefined}>
+      {children}
+    </dialog>
+  );
 }
 
 export function LoadDialog({
@@ -391,35 +257,58 @@ export function LoadDialog({
   error,
   status,
   loading = false,
+  embedded = false,
   onClose,
   onLoadText,
   onLoadFile,
   onLoadSample,
   onError,
+  onRetry,
+  pending = null,
+  onResolvePending,
+  onCancelPending,
 }: LoadDialogProps) {
   const [value, setValue] = useState(initialText);
-  const dialogId = useId();
+  const dialogId = DIALOG_TITLE_IDS.load;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const wasPending = useRef(false);
+  // Going back from step 2 removes the button that held focus, so the title takes it.
+  useEffect(() => {
+    if (wasPending.current && pending === null) {
+      titleRef.current?.focus();
+    }
+    wasPending.current = pending !== null;
+  }, [pending]);
   if (!open) {
     return null;
   }
   return (
-    <dialog open aria-labelledby={dialogId} aria-busy={loading || undefined}>
-      <h2 id={dialogId}>Load a diff</h2>
-      <button type="button" className="button button-secondary" onClick={onClose}>
-        Close
-      </button>
-      <IntakeControls
-        value={value}
-        onValueChange={setValue}
-        onLoadText={onLoadText}
-        onLoadFile={onLoadFile}
-        onLoadSample={onLoadSample}
-        onError={onError}
-        error={error}
-        status={status}
-        loading={loading}
-        idPrefix="load-dialog-diff"
-      />
-    </dialog>
+    <DialogFrame embedded={embedded} labelId={dialogId} loading={loading}>
+      <div className="dialog-header">
+        <h2 id={dialogId} ref={titleRef} tabIndex={-1}>
+          Load a diff
+        </h2>
+        <button type="button" className="button button-secondary" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      {pending !== null && onResolvePending !== undefined && onCancelPending !== undefined ? (
+        <LoadDecision pending={pending} onResolve={onResolvePending} onCancel={onCancelPending} />
+      ) : (
+        <IntakeControls
+          value={value}
+          onValueChange={setValue}
+          onLoadText={onLoadText}
+          onLoadFile={onLoadFile}
+          onLoadSample={onLoadSample}
+          onError={onError}
+          onRetry={onRetry}
+          error={error}
+          status={status}
+          loading={loading}
+          idPrefix="load-dialog-diff"
+        />
+      )}
+    </DialogFrame>
   );
 }

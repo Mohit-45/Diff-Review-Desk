@@ -27,6 +27,35 @@ describe('built-in samples', () => {
     ).toBeGreaterThanOrEqual(8);
   });
 
+  it('SAMPLE-FLAGS pins the rules agent run 1 fires and flags the added dependency', () => {
+    const result = parseDiff(AGENT_RUN_1_DIFF);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const flags = analyze(result.files).flags;
+    expect([...new Set(flags.map((flag) => flag.ruleId))].sort()).toEqual([
+      'ai-elision-marker',
+      'binary-file',
+      'ci-container-changed',
+      'dependency-added',
+      'file-mode-changed',
+      'hidden-unicode',
+      'secret-assignment',
+      'shell-dangerous-command',
+      'test-assertion-removed',
+      'test-disabled',
+      'test-file-deleted',
+    ]);
+    const pathOf = (fileId: string): string | undefined =>
+      result.files.find((file) => file.id === fileId)?.displayPath;
+    const dependency = flags.filter((flag) => flag.ruleId === 'dependency-added');
+    expect(dependency.map((flag) => [pathOf(flag.fileId), flag.severity, flag.count])).toEqual([
+      ['package.json', 'medium', 1],
+    ]);
+    expect(flags.filter((flag) => pathOf(flag.fileId) === 'package-lock.json')).toEqual([]);
+  });
+
   it('SAMPLE-CARRYOVER has six identical hunks, three changed/new hunks and nine total', () => {
     const first = parseDiff(AGENT_RUN_1_DIFF);
     const second = parseDiff(AGENT_RUN_2_DIFF);

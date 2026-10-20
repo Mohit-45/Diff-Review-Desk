@@ -1,27 +1,97 @@
 @layer forced-colors {
   @media (forced-colors: active) {
-    button[aria-pressed='true'] {
+    /* Pressed state is Highlight/HighlightText plus the check mark drawn in base.css. */
+    button[aria-pressed='true'],
+    .hunk:has(.decision-approved) .hunk-toolbar button[aria-pressed='true'],
+    .hunk:has(.decision-rejected) .hunk-toolbar button[aria-pressed='true'] {
+      border-color: Highlight;
       background: Highlight;
       color: HighlightText;
     }
 
-    .hunk[aria-current='true'],
-    .file-row[aria-current='true'] {
+    button {
+      border-color: ButtonText;
+    }
+
+    button:disabled {
+      border-color: GrayText;
+      color: GrayText;
+      opacity: 1;
+    }
+
+    .hunk[aria-current]:not([aria-current='false']),
+    .file-list-row[aria-current]:not([aria-current='false']) {
       border-inline-start: 4px solid Highlight;
     }
 
-    .progress-fill {
+    .file-list-hunk-links button[aria-current]:not([aria-current='false']) {
+      border-color: Highlight;
+      text-decoration: underline;
+    }
+
+    .hunk {
+      border-color: CanvasText;
+    }
+
+    .hunk:has(.decision-approved),
+    .hunk:has(.decision-rejected) {
+      border-inline-start-color: CanvasText;
+    }
+
+    .hunk[aria-current]:not([aria-current='false']) {
+      border-inline-start-color: Highlight;
+    }
+
+    .progress-fill,
+    .review-progress-fill {
       background: Highlight;
     }
 
-    .progress-track {
+    .progress-track,
+    .review-progress-bar {
       border: 1px solid CanvasText;
       background: Canvas;
     }
 
     .chip,
-    .banner {
+    .badge,
+    .banner,
+    .review-notice,
+    .decision,
+    .risk-chip,
+    .file-list-badge,
+    .intake-error {
       border: 1px solid CanvasText;
+    }
+
+    .decision-approved,
+    .decision-rejected,
+    .risk-high,
+    .risk-medium,
+    .risk-low {
+      color: CanvasText;
+    }
+
+    .diff-line-add .diff-change,
+    .diff-line-remove .diff-change {
+      border-inline-start: 3px solid CanvasText;
+    }
+
+    .diff-line-remove .diff-change {
+      border-inline-start-style: dotted;
+    }
+
+    .drop-zone[data-dragging] {
+      border-color: Highlight;
+    }
+
+    dialog {
+      border-color: CanvasText;
+    }
+
+    .rail-disclosure > summary,
+    button.skip-link {
+      border-color: ButtonText;
     }
 
     :focus-visible {

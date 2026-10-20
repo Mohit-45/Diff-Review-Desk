@@ -1,4 +1,4 @@
-import type { ReactNode, SVGProps } from 'react';
+import type { ReactElement, ReactNode, SVGProps } from 'react';
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, 'aria-hidden' | 'viewBox'>;
 
@@ -113,9 +113,15 @@ export type ChevronDirection = 'down' | 'left' | 'right' | 'up';
 
 type ChevronIconProps = Omit<IconProps, 'direction'> & { readonly direction?: ChevronDirection };
 
+// The base glyph points right, so each direction is a clockwise turn from it.
+const CHEVRON_ROTATION: Readonly<Record<ChevronDirection, string>> = {
+  right: '0',
+  down: '90',
+  left: '180',
+  up: '270',
+};
+
 export function ChevronIcon({ direction = 'down', ...props }: ChevronIconProps) {
-  const rotation =
-    direction === 'right' ? 0 : direction === 'down' ? 90 : direction === 'left' ? 180 : 270;
   return (
     <Svg {...props}>
       <path
@@ -124,7 +130,7 @@ export function ChevronIcon({ direction = 'down', ...props }: ChevronIconProps) 
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
-        transform={`rotate(${rotation} 8 8)`}
+        transform={`rotate(${CHEVRON_ROTATION[direction]} 8 8)`}
       />
     </Svg>
   );
@@ -175,6 +181,22 @@ export type IconName =
   | 'new-or-changed'
   | 'info';
 
+type StaticIconName = Exclude<IconName, 'chevron'>;
+
+const STATIC_ICONS: Readonly<Record<StaticIconName, (props: IconProps) => ReactElement>> = {
+  pending: PendingIcon,
+  approved: ApprovedIcon,
+  rejected: RejectedIcon,
+  'risk-high': RiskHighIcon,
+  'risk-medium': RiskMediumIcon,
+  'risk-low': RiskLowIcon,
+  comment: CommentIcon,
+  copy: CopyIcon,
+  unchanged: UnchangedIcon,
+  'new-or-changed': NewOrChangedIcon,
+  info: InfoIcon,
+};
+
 export function Icon({
   name,
   direction,
@@ -183,32 +205,11 @@ export function Icon({
   readonly name: IconName;
   readonly direction?: ChevronDirection;
 }) {
-  switch (name) {
-    case 'pending':
-      return <PendingIcon {...props} />;
-    case 'approved':
-      return <ApprovedIcon {...props} />;
-    case 'rejected':
-      return <RejectedIcon {...props} />;
-    case 'risk-high':
-      return <RiskHighIcon {...props} />;
-    case 'risk-medium':
-      return <RiskMediumIcon {...props} />;
-    case 'risk-low':
-      return <RiskLowIcon {...props} />;
-    case 'comment':
-      return <CommentIcon {...props} />;
-    case 'copy':
-      return <CopyIcon {...props} />;
-    case 'chevron':
-      return <ChevronIcon {...props} direction={direction} />;
-    case 'unchanged':
-      return <UnchangedIcon {...props} />;
-    case 'new-or-changed':
-      return <NewOrChangedIcon {...props} />;
-    case 'info':
-      return <InfoIcon {...props} />;
+  if (name === 'chevron') {
+    return <ChevronIcon {...props} direction={direction} />;
   }
+  const Glyph = STATIC_ICONS[name];
+  return <Glyph {...props} />;
 }
 
 export type { IconProps };

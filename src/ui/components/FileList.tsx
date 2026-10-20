@@ -1,6 +1,9 @@
+import { useState, type KeyboardEvent } from 'react';
 import type { DiffFile, Flag, ReviewState } from '../../core/types';
 import { selectDecision, selectHunkReview } from '../../core/review/selectors';
+import { FILE_ROW_SELECTOR, FileHunkLinks, HUNK_LINKS_SELECTOR } from './FileHunkLinks';
 import { SafeText } from './SafeText';
+import { rovingTarget } from './rovingTarget';
 
 export type FileListProps = {
   readonly files: readonly DiffFile[];
@@ -75,9 +78,72 @@ function fileBadge(file: DiffFile): string | null {
       return 'Renamed';
     case 'copied':
       return 'Copied';
-    default:
+    case 'modified':
       return null;
   }
+}
+
+/** The file rows are one Tab stop: arrows, Home and End move between them, Right enters the hunks. */
+function moveBetweenRows(event: KeyboardEvent<HTMLButtonElement>): void {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+    return;
+  }
+  const item = event.currentTarget.closest('li');
+  if (event.key === 'ArrowRight') {
+    const first = item?.querySelector<HTMLElement>(`${HUNK_LINKS_SELECTOR} button`);
+    if (first) {
+      event.preventDefault();
+      first.focus();
+    }
+    return;
+  }
+  const rows = Array.from(
+    event.currentTarget.closest('ul')?.querySelectorAll<HTMLButtonElement>(FILE_ROW_SELECTOR) ?? [],
+  );
+  const next = rovingTarget(event.key, rows.indexOf(event.currentTarget), rows.length);
+  if (next === null) {
+    return;
+  }
+  event.preventDefault();
+  rows[next]?.focus();
+}
+
+type RowStop = {
+  readonly stopId: string | undefined;
+  /** Only this file draws Hunk links, so the list's size does not grow with the diff. */
+  readonly linkedId: string | undefined;
+  readonly rove: (fileId: string) => void;
+};
+
+function useRowStop(
+  files: readonly DiffFile[],
+  currentFileId: string | null | undefined,
+  currentHunkId: string | null | undefined,
+): RowStop {
+  // The Tab stop follows the current file until a row is focused, then follows the focus; a
+  // row focused while another file was current stops counting once the current file changes.
+  const [rover, setRover] = useState<{ readonly after: string | null; readonly id: string } | null>(
+    null,
+  );
+  const current = currentFileId ?? null;
+  const remembered =
+    rover !== null && rover.after === current && files.some((file) => file.id === rover.id)
+      ? rover.id
+      : null;
+  const currentFile = files.find(
+    (file) => file.id === currentFileId || file.hunks.some((hunk) => hunk.id === currentHunkId),
+  )?.id;
+  return {
+    stopId: remembered ?? currentFile ?? files[0]?.id,
+    linkedId: currentFile ?? files[0]?.id,
+    rove: (fileId) => {
+      setRover((previous) =>
+        previous?.id === fileId && previous.after === current
+          ? previous
+          : { after: current, id: fileId },
+      );
+    },
+  };
 }
 
 export function FileList({
@@ -89,8 +155,9 @@ export function FileList({
   onSelectFile,
   onSelectHunk,
 }: FileListProps) {
+  const { stopId, linkedId, rove } = useRowStop(files, currentFileId, currentHunkId);
   return (
-    <div className="file-list" aria-label="Changed file list">
+    <div className="file-list" role="group" aria-label="Changed file list">
       {files.length === 0 ? (
         <p className="file-list-empty">No files match these filters.</p>
       ) : (
@@ -107,25 +174,34 @@ export function FileList({
                 <button
                   type="button"
                   className="file-list-row"
+                  tabIndex={file.id === stopId ? 0 : -1}
                   aria-current={isCurrent ? 'location' : undefined}
+                  onFocus={() => {
+                    rove(file.id);
+                  }}
+                  onKeyDown={moveBetweenRows}
                   onClick={() => {
                     onSelectFile?.(file.id);
                   }}
                 >
-                  <span className="file-list-status" aria-hidden="true">
+                  <span
+                    className="file-list-status"
+                    data-status={status.toLowerCase().replace(' ', '-')}
+                    aria-hidden="true"
+                  >
                     {statusSymbol(status)}
                   </span>
                   <span className="sr-only">
                     <SafeText>{status}</SafeText>
                   </span>
                   <span className="file-list-count">
-                    <SafeText>{`${counts.decided}/${counts.total}`}</SafeText>
+                    <SafeText>{`${String(counts.decided)}/${String(counts.total)}`}</SafeText>
                   </span>
                   <span className="file-list-path">
                     <SafeText>{file.displayPath}</SafeText>
                   </span>
                   <span className="file-list-lines">
-                    <SafeText>{`+${file.added} −${file.removed}`}</SafeText>
+                    <SafeText>{`+${String(file.added)} −${String(file.removed)}`}</SafeText>
                   </span>
                   {risk ? (
                     <span className={`file-list-risk risk-${risk.severity}`}>
@@ -141,25 +217,19 @@ export function FileList({
                   ) : null}
                   {counts.comments > 0 ? (
                     <span className="file-list-comments">
-                      <SafeText>{`${counts.comments} comment${counts.comments === 1 ? '' : 's'}`}</SafeText>
+                      <SafeText>{`${String(counts.comments)} comment${counts.comments === 1 ? '' : 's'}`}</SafeText>
                     </span>
                   ) : null}
                 </button>
-                {onSelectHunk && file.hunks.length > 0 ? (
-                  <div className="file-list-hunk-links" aria-label="Hunks in file">
-                    {file.hunks.map((hunk) => (
-                      <button
-                        key={hunk.id}
-                        type="button"
-                        onClick={() => {
-                          onSelectHunk(hunk.id);
-                        }}
-                        aria-current={currentHunkId === hunk.id ? 'location' : undefined}
-                      >
-                        <SafeText>{`Hunk ${hunk.index + 1}`}</SafeText>
-                      </button>
-                    ))}
-                  </div>
+                {onSelectHunk && file.id === linkedId && file.hunks.length > 0 ? (
+                  <FileHunkLinks
+                    hunks={file.hunks}
+                    currentHunkId={currentHunkId}
+                    onSelectHunk={onSelectHunk}
+                    onFocusWithin={() => {
+                      rove(file.id);
+                    }}
+                  />
                 ) : null}
               </li>
             );

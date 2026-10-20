@@ -18,8 +18,6 @@ export type CarryOverTarget = {
   readonly label?: string;
 };
 
-const own = Object.prototype.hasOwnProperty;
-
 function uniqueIds(ids: readonly string[]): readonly string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -54,7 +52,7 @@ function targetFrom(
 }
 
 function reviewFor(state: ReviewState, id: string): HunkReview | undefined {
-  return own.call(state.hunks, id) ? state.hunks[id] : undefined;
+  return Object.hasOwn(state.hunks, id) ? state.hunks[id] : undefined;
 }
 
 function carrySummary(previous: ReviewState, target: CarryOverTarget): CarryOverSummary {

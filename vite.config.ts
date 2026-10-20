@@ -21,6 +21,8 @@ const server = resolveServerConfig(process.env);
 export default defineConfig({
   base: './',
   plugins: [react()],
+  // The polyfill embeds a fetch() call; every supported browser already has modulepreload.
+  build: { modulePreload: { polyfill: false } },
   server,
   preview: { ...server, allowedHosts: true },
 } satisfies UserConfig);

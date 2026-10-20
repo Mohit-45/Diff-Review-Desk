@@ -13,14 +13,8 @@ export type ReviewAction =
   | { readonly type: 'hydrate'; readonly state: ReviewState }
   | { readonly type: 'reset' };
 
-const own = Object.prototype.hasOwnProperty;
-
 function emptyHunks(): Record<string, HunkReview> {
   return Object.create(null) as Record<string, HunkReview>;
-}
-
-function hasOwn<T>(record: Readonly<Record<string, T>>, key: string): boolean {
-  return own.call(record, key);
 }
 
 function isKnownHunk(state: ReviewState, id: string): boolean {
@@ -61,7 +55,7 @@ function copyHunksForIds(
 ): Record<string, HunkReview> {
   const result = emptyHunks();
   for (const id of ids) {
-    if (!hasOwn(source, id)) {
+    if (!Object.hasOwn(source, id)) {
       continue;
     }
     const review = source[id];
@@ -83,7 +77,7 @@ function hunkMapsEqual(
     return false;
   }
   for (const id of leftKeys) {
-    if (!hasOwn(right, id) || !reviewEquals(left[id], right[id])) {
+    if (!Object.hasOwn(right, id) || !reviewEquals(left[id], right[id])) {
       return false;
     }
   }
@@ -177,56 +171,71 @@ export function createReviewState(
 
 export const initialReviewState = createReviewState;
 
+function withoutHunk(
+  hunks: Readonly<Record<string, HunkReview>>,
+  id: string,
+): Record<string, HunkReview> {
+  return Object.fromEntries(Object.entries(hunks).filter(([key]) => key !== id));
+}
+
+function decide(state: ReviewState, id: string, decision: 'approved' | 'rejected'): ReviewState {
+  if (!isKnownHunk(state, id)) {
+    return state;
+  }
+  const existing = Object.hasOwn(state.hunks, id) ? state.hunks[id] : undefined;
+  if (existing?.decision === decision) {
+    return state;
+  }
+  const hunks = { ...state.hunks } as Record<string, HunkReview>;
+  hunks[id] = { decision, comment: existing?.comment ?? '' };
+  return { ...state, hunks };
+}
+
+function clearDecision(state: ReviewState, id: string): ReviewState {
+  if (!isKnownHunk(state, id) || !Object.hasOwn(state.hunks, id)) {
+    return state;
+  }
+  const existing = state.hunks[id];
+  if (existing === undefined || existing.decision === null) {
+    return state;
+  }
+  if (existing.comment === '') {
+    return { ...state, hunks: withoutHunk(state.hunks, id) };
+  }
+  const hunks = { ...state.hunks } as Record<string, HunkReview>;
+  hunks[id] = { decision: null, comment: existing.comment };
+  return { ...state, hunks };
+}
+
+function setComment(state: ReviewState, id: string, rawComment: string): ReviewState {
+  if (!isKnownHunk(state, id)) {
+    return state;
+  }
+  const comment = normalizeComment(rawComment);
+  const existing = Object.hasOwn(state.hunks, id) ? state.hunks[id] : undefined;
+  if (existing?.comment === comment) {
+    return state;
+  }
+  const hunks = { ...state.hunks } as Record<string, HunkReview>;
+  hunks[id] = { decision: existing?.decision ?? null, comment };
+  return { ...state, hunks };
+}
+
+function setOverallNote(state: ReviewState, rawNote: string): ReviewState {
+  const note = normalizeOverallNote(rawNote);
+  return note === state.overallNote ? state : { ...state, overallNote: note };
+}
+
 export function reviewReducer(state: ReviewState, action: ReviewAction): ReviewState {
   switch (action.type) {
-    case 'decide': {
-      if (!isKnownHunk(state, action.id)) {
-        return state;
-      }
-      const existing = hasOwn(state.hunks, action.id) ? state.hunks[action.id] : undefined;
-      if (existing?.decision === action.decision) {
-        return state;
-      }
-      const hunks = { ...state.hunks } as Record<string, HunkReview>;
-      hunks[action.id] = {
-        decision: action.decision,
-        comment: existing?.comment ?? '',
-      };
-      return { ...state, hunks };
-    }
-    case 'clear': {
-      if (!isKnownHunk(state, action.id) || !hasOwn(state.hunks, action.id)) {
-        return state;
-      }
-      const existing = state.hunks[action.id];
-      if (existing === undefined || existing.decision === null) {
-        return state;
-      }
-      const hunks = { ...state.hunks } as Record<string, HunkReview>;
-      if (existing.comment === '') {
-        delete hunks[action.id];
-      } else {
-        hunks[action.id] = { decision: null, comment: existing.comment };
-      }
-      return { ...state, hunks };
-    }
-    case 'setComment': {
-      if (!isKnownHunk(state, action.id)) {
-        return state;
-      }
-      const comment = normalizeComment(action.comment);
-      const existing = hasOwn(state.hunks, action.id) ? state.hunks[action.id] : undefined;
-      if (existing?.comment === comment) {
-        return state;
-      }
-      const hunks = { ...state.hunks } as Record<string, HunkReview>;
-      hunks[action.id] = { decision: existing?.decision ?? null, comment };
-      return { ...state, hunks };
-    }
-    case 'setOverallNote': {
-      const note = normalizeOverallNote(action.note);
-      return note === state.overallNote ? state : { ...state, overallNote: note };
-    }
+    case 'decide':
+      return decide(state, action.id, action.decision);
+    case 'clear':
+      return clearDecision(state, action.id);
+    case 'setComment':
+      return setComment(state, action.id, action.comment);
+    case 'setOverallNote':
+      return setOverallNote(state, action.note);
     case 'hydrate':
       return hydrateState(state, action.state);
     case 'reset':

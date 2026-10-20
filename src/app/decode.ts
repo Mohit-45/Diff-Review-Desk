@@ -1,6 +1,16 @@
 import { LIMITS } from '../core/limits';
 import { fail, ok } from '../core/result';
 import type { DecoderInput, ParseError, Result } from '../core/types';
+import { stripAnsiOnStructuralLines } from './ansi';
+import { hasNulInPrefix, hasUtf16Signature } from './byteSignatures';
+import {
+  binaryInputError,
+  emptyDiffError,
+  emptyFileError,
+  tooLargeError,
+  unreadableFileError,
+  utf16Error,
+} from './decodeErrors';
 
 export type DecodeWarning = {
   readonly code:
@@ -22,72 +32,8 @@ export type DecodedDiff = {
 
 const UTF8_BOM = '\uFEFF';
 
-function parseError(
-  code: ParseError['code'],
-  title: string,
-  detail: string,
-  hint: ParseError['hint'],
-  suggestion: string | null,
-): ParseError {
-  return { code, title, detail, hint, suggestion };
-}
-
 function bytesForText(text: string): Uint8Array {
   return new TextEncoder().encode(text);
-}
-
-function hasUtf16Signature(bytes: Uint8Array): boolean {
-  if ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff)) {
-    return true;
-  }
-  const length = Math.min(64, bytes.length);
-  if (length < 2) {
-    return false;
-  }
-  let ascii = true;
-  let alternatingNul = true;
-  for (let index = 0; index < length; index += 1) {
-    const byte = bytes[index];
-    if (byte === undefined) {
-      break;
-    }
-    if (byte !== 0 && (byte < 0x09 || byte > 0x7e)) {
-      ascii = false;
-      break;
-    }
-    if (index % 2 === 0 ? byte === 0 : byte !== 0) {
-      alternatingNul = false;
-    }
-  }
-  if (ascii && alternatingNul) {
-    return true;
-  }
-  ascii = true;
-  alternatingNul = true;
-  for (let index = 0; index < length; index += 1) {
-    const byte = bytes[index];
-    if (byte === undefined) {
-      break;
-    }
-    if (byte !== 0 && (byte < 0x09 || byte > 0x7e)) {
-      ascii = false;
-      break;
-    }
-    if (index % 2 === 1 ? byte === 0 : byte !== 0) {
-      alternatingNul = false;
-    }
-  }
-  return ascii && alternatingNul;
-}
-
-function hasNulInPrefix(bytes: Uint8Array, count: number): boolean {
-  const length = Math.min(bytes.length, count);
-  for (let index = 0; index < length; index += 1) {
-    if (bytes[index] === 0) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function addWarning(
@@ -141,61 +87,17 @@ function normalizeLineEndings(text: string): {
   return { text, crlf: false, mixed: crlfCount > 0 && bareLfCount > 0 };
 }
 
-function stripAnsiOnStructuralLines(text: string): {
-  readonly text: string;
-  readonly count: number;
-} {
-  const ansi = /\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/gu;
-  const structural =
-    /^(?:diff --(?:git|cc) |(?:---|\+\+\+|@@|@@@ |index |old mode |new mode |new file mode |deleted file mode |similarity index |rename |copy |Binary files |GIT binary patch))/u;
-  let count = 0;
-  const lines = text.split('\n').map((line) => {
-    if (!line.startsWith('\u001b')) {
-      return line;
-    }
-    const stripped = line.replace(ansi, '');
-    if (stripped !== line && structural.test(stripped)) {
-      count += 1;
-      return stripped;
-    }
-    return line;
-  });
-  return { text: lines.join('\n'), count };
-}
+const NUL_SCAN_BYTES = 8_000;
 
 function decodeBytes(bytes: Uint8Array): Result<DecodedDiff, ParseError> {
   if (bytes.length > LIMITS.maxInputBytes) {
-    return fail(
-      parseError(
-        'too-large',
-        'This diff is too large',
-        `The input is ${bytes.length} bytes; the limit is ${LIMITS.maxInputBytes} bytes.`,
-        'generic',
-        'Review a narrower change with `git diff -- src/`.',
-      ),
-    );
+    return fail(tooLargeError(bytes.length));
   }
   if (hasUtf16Signature(bytes)) {
-    return fail(
-      parseError(
-        'not-a-diff',
-        'This looks like UTF-16 text',
-        'PowerShell `>` writes UTF-16. Re-run with `| Out-File -Encoding utf8`, or paste the text.',
-        'utf16',
-        'Re-run the command with UTF-8 output, or paste the text directly.',
-      ),
-    );
+    return fail(utf16Error());
   }
-  if (hasNulInPrefix(bytes, 8_000)) {
-    return fail(
-      parseError(
-        'binary-input',
-        'This looks like a binary file, not text',
-        'A NUL byte appeared near the start of the input.',
-        'generic',
-        'Choose a text diff or run `git diff --no-ext-diff --no-color`.',
-      ),
-    );
+  if (hasNulInPrefix(bytes, NUL_SCAN_BYTES)) {
+    return fail(binaryInputError());
   }
   const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
   let warnings: readonly DecodeWarning[] = [];
@@ -211,21 +113,21 @@ function decodeBytes(bytes: Uint8Array): Result<DecodedDiff, ParseError> {
   return finishDecode(decoded, bytes.length, warnings);
 }
 
+function decodeString(text: string): Result<DecodedDiff, ParseError> {
+  const bytes = bytesForText(text);
+  if (hasNulInPrefix(bytes, NUL_SCAN_BYTES)) {
+    return fail(binaryInputError());
+  }
+  return finishDecode(text, bytes.length, []);
+}
+
 function finishDecode(
   input: string,
   inputBytes: number,
   initialWarnings: readonly DecodeWarning[],
 ): Result<DecodedDiff, ParseError> {
   if (inputBytes > LIMITS.maxInputBytes) {
-    return fail(
-      parseError(
-        'too-large',
-        'This diff is too large',
-        `The input is ${inputBytes} bytes; the limit is ${LIMITS.maxInputBytes} bytes.`,
-        'generic',
-        'Review a narrower change with `git diff -- src/`.',
-      ),
-    );
+    return fail(tooLargeError(inputBytes));
   }
   let text = input.startsWith(UTF8_BOM) ? input.slice(1) : input;
   let warnings = initialWarnings;
@@ -257,52 +159,20 @@ function finishDecode(
     warnings = addWarning(warnings, 'nul-replaced', 'NUL characters were visualised.', nulCount);
   }
   if (/^\s*$/u.test(text)) {
-    return fail(
-      parseError(
-        'empty',
-        'Nothing to review',
-        'The diff is empty or contains only whitespace.',
-        null,
-        'Paste a unified diff or try a sample.',
-      ),
-    );
+    return fail(emptyDiffError());
   }
   return ok({ text, inputBytes, warnings });
 }
 
 export function decode(input: DecoderInput | string | Uint8Array): Result<DecodedDiff, ParseError> {
   if (typeof input === 'string') {
-    const bytes = bytesForText(input);
-    if (hasNulInPrefix(bytes, 8_000)) {
-      return fail(
-        parseError(
-          'binary-input',
-          'This looks like a binary file, not text',
-          'A NUL byte appeared near the start of the input.',
-          'generic',
-          'Choose a text diff or run `git diff --no-ext-diff --no-color`.',
-        ),
-      );
-    }
-    return finishDecode(input, bytes.length, []);
+    return decodeString(input);
   }
   if (input instanceof Uint8Array) {
     return decodeBytes(input);
   }
   if (input.kind === 'text') {
-    const bytes = bytesForText(input.text);
-    if (hasNulInPrefix(bytes, 8_000)) {
-      return fail(
-        parseError(
-          'binary-input',
-          'This looks like a binary file, not text',
-          'A NUL byte appeared near the start of the input.',
-          'generic',
-          'Choose a text diff or run `git diff --no-ext-diff --no-color`.',
-        ),
-      );
-    }
-    return finishDecode(input.text, bytes.length, []);
+    return decodeString(input.text);
   }
   return decodeBytes(input.bytes);
 }
@@ -322,38 +192,14 @@ export async function decodeFile(
 ): Promise<Result<DecodedDiff, ParseError>> {
   try {
     if (file.size === 0) {
-      return fail(
-        parseError(
-          'empty',
-          'Nothing to review',
-          'The selected file is empty.',
-          null,
-          'Choose a diff file or paste the diff text.',
-        ),
-      );
+      return fail(emptyFileError());
     }
     if (file.size > LIMITS.maxInputBytes) {
-      return fail(
-        parseError(
-          'too-large',
-          'This diff is too large',
-          `The input is ${file.size} bytes; the limit is ${LIMITS.maxInputBytes} bytes.`,
-          'generic',
-          'Review a narrower change with `git diff -- src/`.',
-        ),
-      );
+      return fail(tooLargeError(file.size));
     }
     const buffer = await file.arrayBuffer();
     return decodeBytes(new Uint8Array(buffer));
   } catch {
-    return fail(
-      parseError(
-        'internal',
-        `Could not read ${file.name ?? 'this file'}`,
-        `The file ${file.name ?? 'could not be read'} could not be read from this browser.`,
-        'generic',
-        'Choose the file again or paste the diff text. Retry.',
-      ),
-    );
+    return fail(unreadableFileError(file.name));
   }
 }

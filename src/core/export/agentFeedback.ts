@@ -5,14 +5,17 @@ import { excerptDetails } from './excerpt';
 import {
   decisionCounts,
   exportEntries,
+  exportInputFromArgs,
   hasComment,
-  normalizeExportInput,
-  type ExportInput,
   type ExportEntry,
+  type ExportInput,
   type NormalizedExportInput,
+  type PositionalExportArgs,
 } from './model';
 import { rangeLabel } from './range';
 import { sanitizeSingleLine, sanitizeText } from './redact';
+
+const NOTHING_TO_SEND = 'Nothing to send. No hunks are rejected and there are no notes.';
 
 const NO_COMMENT = 'none given. Revert this hunk, or rework it so a reviewer can approve it.';
 
@@ -24,12 +27,13 @@ const RULES = [
   "5. When finished, run the project's tests and reply with one line per item saying what you changed. Then output the new `git diff HEAD`.",
 ] as const;
 
-function safeField(value: string, maxChars: number = LIMITS.maxExcerptChars): string {
-  return sanitizeText(value, { maxChars }).text;
+// Only diff excerpt lines are cut. Comments, notes and paths keep their full text.
+function safeField(value: string): string {
+  return sanitizeText(value).text;
 }
 
-function safeSingleLine(value: string, maxChars: number = LIMITS.maxExcerptChars): string {
-  return sanitizeSingleLine(value, maxChars).text;
+function safeSingleLine(value: string): string {
+  return sanitizeSingleLine(value).text;
 }
 
 function pathInline(file: DiffFile): string {
@@ -45,7 +49,7 @@ function commentLines(entry: ExportEntry): string[] {
 
 function riskIds(entry: ExportEntry): string {
   const ids = [...new Set(entry.flags.map((flag) => flag.ruleId))];
-  return ids.length === 0 ? 'none' : ids.map((id) => safeSingleLine(id, 80)).join(', ');
+  return ids.length === 0 ? 'none' : ids.map((id) => safeSingleLine(id)).join(', ');
 }
 
 function excerptBlock(entry: ExportEntry, excerptLines: number): string[] {
@@ -64,10 +68,10 @@ function renderMustFix(entries: readonly ExportEntry[], excerptLines: number): s
   if (rejected.length === 0) {
     return [];
   }
-  const lines = [`## Must fix (${rejected.length})`];
+  const lines = [`## Must fix (${String(rejected.length)})`];
   rejected.forEach((entry, index) => {
     lines.push(
-      `### ${index + 1}. ${pathInline(entry.file)} (${rangeLabel(entry.hunk, entry.file)})`,
+      `### ${String(index + 1)}. ${pathInline(entry.file)} (${rangeLabel(entry.hunk, entry.file)})`,
     );
     lines.push(...commentLines(entry));
     lines.push(`Risk flags: ${riskIds(entry)}`);
@@ -85,7 +89,7 @@ function renderNonBlocking(entries: readonly ExportEntry[]): string[] {
   if (notes.length === 0) {
     return [];
   }
-  const lines = [`## Non-blocking notes (${notes.length})`];
+  const lines = [`## Non-blocking notes (${String(notes.length)})`];
   for (const entry of notes) {
     lines.push(
       `- ${pathInline(entry.file)} (${rangeLabel(entry.hunk, entry.file)}, ${entry.review.decision ?? 'pending'}):`,
@@ -104,7 +108,7 @@ function renderApproved(entries: readonly ExportEntry[], collapsed: boolean): st
   if (approved.length === 0) {
     return [];
   }
-  const lines = [`## Approved: do not modify (${approved.length})`];
+  const lines = [`## Approved: do not modify (${String(approved.length)})`];
   if (collapsed) {
     const seen = new Set<string>();
     for (const entry of approved) {
@@ -131,16 +135,15 @@ function renderFeedback(
   const entries = exportEntries(input);
   const counts = decisionCounts(entries);
   const hasNotes =
-    Boolean(/\S/u.test(input.state.overallNote)) ||
-    entries.some((entry) => hasComment(entry.review));
+    /\S/u.test(input.state.overallNote) || entries.some((entry) => hasComment(entry.review));
   if (counts.rejected === 0 && !hasNotes) {
-    return 'Nothing to send. No hunks are rejected and there are no notes.';
+    return NOTHING_TO_SEND;
   }
 
-  const lines: string[] = ['# Code review feedback (round ' + input.state.round + ')', ''];
+  const lines: string[] = [`# Code review feedback (round ${String(input.state.round)})`, ''];
   if (counts.rejected > 0) {
     lines.push(
-      `A human reviewed your changes. ${counts.rejected} hunks were rejected. Fix every item under "Must fix".`,
+      `A human reviewed your changes. ${String(counts.rejected)} hunks were rejected. Fix every item under "Must fix".`,
     );
   } else {
     lines.push(
@@ -172,60 +175,47 @@ function renderFeedback(
   return lines.join('\n');
 }
 
+const MAX_OUTPUT_CHARS = 60_000;
+
+/** Shrinks excerpts, then the approved list, until the output fits or only a warning is left. */
+function fitFeedback(input: NormalizedExportInput): string {
+  let output = renderFeedback(input, LIMITS.maxExcerptLines, false, null);
+  if (output.length <= MAX_OUTPUT_CHARS || output === NOTHING_TO_SEND) {
+    return output;
+  }
+
+  output = renderFeedback(input, 4, false, null);
+  if (output.length <= MAX_OUTPUT_CHARS) {
+    return output;
+  }
+  output = renderFeedback(input, 0, false, null);
+  if (output.length <= MAX_OUTPUT_CHARS) {
+    return output;
+  }
+  output = renderFeedback(input, 0, true, null);
+  if (output.length <= MAX_OUTPUT_CHARS) {
+    return output;
+  }
+  const warning = `Output is ${String(output.length)} chars; some agents truncate long prompts.`;
+  return renderFeedback(input, 0, true, warning);
+}
+
 /** Deterministic agent-feedback Markdown export. */
 export function generateAgentFeedback(input: ExportInput): string;
 export function generateAgentFeedback(
   state: ReviewState,
   files: readonly DiffFile[],
-  flags?: readonly Flag[],
-  time?: string,
-): string;
-export function generateAgentFeedback(
-  state: ReviewState,
-  files: readonly DiffFile[],
-  flags?: readonly Flag[],
-  warnings?: readonly ParseWarning[] | readonly string[],
-  time?: string,
-): string;
-export function generateAgentFeedback(
-  first: ExportInput | ReviewState,
-  ...parts: [
-    files?: readonly DiffFile[],
+  ...rest: [
     flags?: readonly Flag[],
     warnings?: readonly ParseWarning[] | readonly string[] | string,
     time?: string,
   ]
+): string;
+export function generateAgentFeedback(
+  first: ExportInput | ReviewState,
+  ...parts: PositionalExportArgs
 ): string {
-  const files = parts[0] ?? [];
-  const flags = parts[1] ?? [];
-  const warnings = parts[2] ?? [];
-  const time = parts[3] ?? '';
-  const input = normalizeExportInput(
-    first,
-    files,
-    flags,
-    typeof warnings === 'string' ? [] : warnings,
-    typeof warnings === 'string' ? warnings : time,
-  );
-  let output = renderFeedback(input, LIMITS.maxExcerptLines, false, null);
-  if (
-    output.length <= 60_000 ||
-    output === 'Nothing to send. No hunks are rejected and there are no notes.'
-  ) {
-    return output;
-  }
-
-  output = renderFeedback(input, 4, false, null);
-  if (output.length <= 60_000) {
-    return output;
-  }
-  output = renderFeedback(input, 0, false, null);
-  if (output.length <= 60_000) {
-    return output;
-  }
-  output = renderFeedback(input, 0, true, null);
-  const warning = `Output is ${output.length} chars; some agents truncate long prompts.`;
-  return renderFeedback(input, 0, true, warning);
+  return fitFeedback(exportInputFromArgs(first, parts));
 }
 
 export const agentFeedback = generateAgentFeedback;

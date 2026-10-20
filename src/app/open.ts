@@ -4,6 +4,7 @@ import type {
   DiffFile,
   ParseError,
   ParseResult,
+  ParseWarning,
   ReviewState,
   Result,
   StoredReview,
@@ -14,6 +15,8 @@ import type { ReviewStorageAdapter } from '../storage/adapter';
 import { decode, type DecodedDiff } from './decode';
 
 export type DiffParser = (text: string) => ParseResult;
+
+type ParsedOk = Extract<ParseResult, { readonly ok: true }>;
 
 export type OpenChoice = 'carry-over' | 'new';
 
@@ -28,7 +31,7 @@ export type OpenDiffOptions = {
 
 export type OpenDiffValue = {
   readonly decoded: DecodedDiff;
-  readonly parsed: Extract<ParseResult, { readonly ok: true }>;
+  readonly parsed: ParsedOk;
   readonly state: ReviewState;
   readonly outcome: 'new' | 'same-open' | 'restored' | 'carry-over';
   readonly carryOver: CarryOverSummary | null;
@@ -42,6 +45,10 @@ export type RestoreValue = {
   readonly record: StoredReview;
   readonly diffText: string | null;
   readonly restoredDiff: boolean;
+  /** The parsed files of the restored diff, so the caller need not parse the text again. */
+  readonly files: readonly DiffFile[] | null;
+  /** What parsing the restored text reported again; empty when there is no text. */
+  readonly warnings: readonly ParseWarning[];
   readonly notice: string | null;
 };
 
@@ -68,10 +75,11 @@ function defaultLabel(files: readonly DiffFile[], sampleTitle?: string): string 
   if (files.length === 1) {
     return first.displayPath;
   }
-  return `${first.displayPath} and ${files.length - 1} more`;
+  return `${first.displayPath} and ${String(files.length - 1)} more`;
 }
 
-function stateFromStored(stored: StoredReview, currentIds: readonly string[]): ReviewState {
+/** A stored record as a review state over the given hunk ids; ids the diff lacks are dropped. */
+export function stateFromStored(stored: StoredReview, currentIds: readonly string[]): ReviewState {
   const hunks = Object.create(null) as Record<
     string,
     { readonly decision: 'approved' | 'rejected' | null; readonly comment: string }
@@ -101,10 +109,7 @@ function parserFailure(): OpenDiffError {
   return { code: 'parser-failed', message: 'The diff parser could not produce a result.' };
 }
 
-function addDecodeWarnings(
-  parsed: Extract<ParseResult, { readonly ok: true }>,
-  decoded: DecodedDiff,
-): Extract<ParseResult, { readonly ok: true }> {
+function addDecodeWarnings(parsed: ParsedOk, decoded: DecodedDiff): ParsedOk {
   const known = new Set(parsed.warnings.map((warning) => warning.code));
   const transportWarnings = decoded.warnings
     .filter((warning) => !known.has(warning.code))
@@ -123,6 +128,57 @@ function addDecodeWarnings(
   return transportWarnings.length === 0
     ? parsed
     : { ...parsed, warnings: [...transportWarnings, ...parsed.warnings] };
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+function labelFor(files: readonly DiffFile[], options: OpenDiffOptions): string {
+  if (options.choice === 'carry-over' && isPresent(options.current)) {
+    return options.label ?? options.current.label;
+  }
+  return options.label ?? defaultLabel(files, options.sampleTitle);
+}
+
+function runParser(parser: DiffParser, decoded: DecodedDiff): Result<ParsedOk, OpenDiffError> {
+  let parsed: ParseResult;
+  try {
+    parsed = parser(decoded.text);
+  } catch {
+    return fail(parserFailure());
+  }
+  if (!parsed.ok) {
+    return fail(parsed.error);
+  }
+  return ok(addDecodeWarnings(parsed, decoded));
+}
+
+function resolveOutcome(
+  decoded: DecodedDiff,
+  parsed: ParsedOk,
+  options: OpenDiffOptions,
+): OpenDiffValue {
+  const { current, stored } = options;
+  if (isPresent(current) && current.fingerprint === parsed.fingerprint) {
+    return { decoded, parsed, state: current, outcome: 'same-open', carryOver: null };
+  }
+  const ids = hunkIds(parsed.files);
+  if (isPresent(stored) && stored.fingerprint === parsed.fingerprint) {
+    const state = stateFromStored(stored, ids);
+    return { decoded, parsed, state, outcome: 'restored', carryOver: null };
+  }
+  const label = labelFor(parsed.files, options);
+  if (isPresent(current) && options.choice === 'carry-over') {
+    const carried = carryOverSummary(current, {
+      fingerprint: parsed.fingerprint,
+      hunkIds: ids,
+      label,
+    });
+    return { decoded, parsed, state: carried.state, outcome: 'carry-over', carryOver: carried };
+  }
+  const state = createReviewState(parsed.fingerprint, ids, label);
+  return { decoded, parsed, state, outcome: 'new', carryOver: null };
 }
 
 export function openDiff(
@@ -147,56 +203,11 @@ export function openDiff(
   if (!decoded.ok) {
     return decoded;
   }
-  let parsed: ParseResult;
-  try {
-    parsed = options.parser(decoded.value.text);
-  } catch {
-    return fail(parserFailure());
-  }
+  const parsed = runParser(options.parser, decoded.value);
   if (!parsed.ok) {
-    return fail(parsed.error);
+    return parsed;
   }
-  parsed = addDecodeWarnings(parsed, decoded.value);
-  const ids = hunkIds(parsed.files);
-  const label =
-    options.label ??
-    (options.choice === 'carry-over' && options.current !== null && options.current !== undefined
-      ? options.current.label
-      : defaultLabel(parsed.files, options.sampleTitle));
-  const current = options.current;
-  if (current !== null && current !== undefined && current.fingerprint === parsed.fingerprint) {
-    return ok({
-      decoded: decoded.value,
-      parsed,
-      state: current,
-      outcome: 'same-open',
-      carryOver: null,
-    });
-  }
-  if (
-    options.stored !== null &&
-    options.stored !== undefined &&
-    options.stored.fingerprint === parsed.fingerprint
-  ) {
-    const state = stateFromStored(options.stored, ids);
-    return ok({ decoded: decoded.value, parsed, state, outcome: 'restored', carryOver: null });
-  }
-  if (current !== null && current !== undefined && options.choice === 'carry-over') {
-    const carried = carryOverSummary(current, {
-      fingerprint: parsed.fingerprint,
-      hunkIds: ids,
-      label,
-    });
-    return ok({
-      decoded: decoded.value,
-      parsed,
-      state: carried.state,
-      outcome: 'carry-over',
-      carryOver: carried,
-    });
-  }
-  const state = createReviewState(parsed.fingerprint, ids, label);
-  return ok({ decoded: decoded.value, parsed, state, outcome: 'new', carryOver: null });
+  return ok(resolveOutcome(decoded.value, parsed.value, options));
 }
 
 export const open = openDiff;
@@ -224,7 +235,9 @@ export function restoreReview(
       record: stored.value,
       diffText: null,
       restoredDiff: false,
-      notice: `Saved decisions for ${stored.value.hunkIds.length} hunks. Paste or drop the same diff to restore them.`,
+      files: null,
+      warnings: [],
+      notice: `Saved decisions for ${String(stored.value.hunkIds.length)} hunks. Paste or drop the same diff to restore them.`,
     });
   }
   const opened = openDiff(savedText.value, { parser: options.parser, stored: stored.value });
@@ -237,7 +250,9 @@ export function restoreReview(
       record: stored.value,
       diffText: null,
       restoredDiff: false,
-      notice: `Saved decisions for ${stored.value.hunkIds.length} hunks were kept, but the saved diff did not match. Paste the same diff to restore them.`,
+      files: null,
+      warnings: [],
+      notice: `Saved decisions for ${String(stored.value.hunkIds.length)} hunks were kept, but the saved diff did not match. Paste the same diff to restore them.`,
     });
   }
   return ok({
@@ -245,6 +260,8 @@ export function restoreReview(
     record: stored.value,
     diffText: savedText.value,
     restoredDiff: true,
+    files: opened.value.parsed.files,
+    warnings: opened.value.parsed.warnings,
     notice: null,
   });
 }

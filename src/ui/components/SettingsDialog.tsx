@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import type { Prefs } from '../../core/types';
+import { DIALOG_TITLE_IDS } from '../dialogIds';
+import {
+  BehaviorFieldset,
+  ClearDataSection,
+  PrivacyFieldset,
+  ThemeFieldset,
+} from './SettingsSections';
 
 export type SettingsDialogProps = {
   readonly prefs?: Prefs;
@@ -38,38 +45,20 @@ export function SettingsDialog({
 
   if (currentPrefs === undefined) {
     return (
-      <section className="dialog-content" aria-labelledby="settings-dialog-title">
-        <h2 id="settings-dialog-title">Settings</h2>
+      <div className="dialog-content">
+        <h2 id={DIALOG_TITLE_IDS.settings}>Settings</h2>
         <p>Settings are unavailable.</p>
-      </section>
+      </div>
     );
   }
   const activePrefs = currentPrefs;
 
-  function update(next: Prefs, field: (() => void) | undefined = undefined) {
+  function update(next: Prefs, notify?: () => void) {
     onPrefsChange?.(next);
     if (onChange !== onPrefsChange) {
       onChange?.(next);
     }
-    field?.();
-  }
-
-  function chooseTheme(theme: Prefs['theme']) {
-    update({ ...activePrefs, theme }, () => onThemeChange?.(theme));
-  }
-
-  function chooseShortcutsEnabled(enabled: boolean) {
-    update({ ...activePrefs, shortcutsEnabled: enabled }, () =>
-      onShortcutsEnabledChange?.(enabled),
-    );
-  }
-
-  function chooseAutoAdvance(enabled: boolean) {
-    update({ ...activePrefs, autoAdvance: enabled }, () => onAutoAdvanceChange?.(enabled));
-  }
-
-  function chooseRememberDiff(rememberDiff: boolean) {
-    update({ ...activePrefs, rememberDiff }, () => onRememberDiffChange?.(rememberDiff));
+    notify?.();
   }
 
   async function clearData() {
@@ -83,10 +72,10 @@ export function SettingsDialog({
   }
 
   return (
-    <section className="dialog-content" aria-labelledby="settings-dialog-title">
-      <header className="dialog-header">
+    <div className="dialog-content">
+      <div className="dialog-header">
         <div>
-          <h2 id="settings-dialog-title">Settings</h2>
+          <h2 id={DIALOG_TITLE_IDS.settings}>Settings</h2>
           <p>Control appearance, keyboard behavior and local diff retention.</p>
         </div>
         {onClose !== undefined ? (
@@ -94,123 +83,45 @@ export function SettingsDialog({
             Close
           </button>
         ) : null}
-      </header>
+      </div>
 
-      <fieldset>
-        <legend>Theme</legend>
-        <label>
-          <input
-            type="radio"
-            name="settings-theme"
-            value="system"
-            checked={currentPrefs.theme === 'system'}
-            onChange={() => {
-              chooseTheme('system');
-            }}
-          />
-          System
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="settings-theme"
-            value="light"
-            checked={currentPrefs.theme === 'light'}
-            onChange={() => {
-              chooseTheme('light');
-            }}
-          />
-          Light
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="settings-theme"
-            value="dark"
-            checked={currentPrefs.theme === 'dark'}
-            onChange={() => {
-              chooseTheme('dark');
-            }}
-          />
-          Dark
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Review behavior</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={currentPrefs.shortcutsEnabled}
-            onChange={(event) => {
-              chooseShortcutsEnabled(event.currentTarget.checked);
-            }}
-          />
-          Single-key shortcuts
-        </label>
-        <p>When off, use the visible buttons instead of single letters.</p>
-        <label>
-          <input
-            type="checkbox"
-            checked={currentPrefs.autoAdvance}
-            onChange={(event) => {
-              chooseAutoAdvance(event.currentTarget.checked);
-            }}
-          />
-          Advance after each decision
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Privacy</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={currentPrefs.rememberDiff}
-            onChange={(event) => {
-              chooseRememberDiff(event.currentTarget.checked);
-            }}
-          />
-          Remember diff text in this browser
-        </label>
-        <p>Review decisions are saved locally. Diff text is not retained unless this is enabled.</p>
-      </fieldset>
-
-      <section aria-labelledby="clear-data-title">
-        <h3 id="clear-data-title">Saved data</h3>
-        <p>Remove saved reviews, preferences and any remembered diff text from this browser.</p>
-        {confirmingClear ? (
-          <div role="alertdialog" aria-labelledby="clear-data-confirm-title">
-            <h4 id="clear-data-confirm-title">Clear all saved data?</h4>
-            <p>This cannot be undone.</p>
-            <button type="button" className="button button-danger" onClick={() => void clearData()}>
-              Clear all saved data
-            </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => {
-                setConfirmingClear(false);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="button button-danger"
-            onClick={() => {
-              setConfirmingClear(true);
-            }}
-            disabled={
-              onClearData === undefined && onClearSavedData === undefined && onClear === undefined
-            }
-          >
-            Clear all saved data
-          </button>
-        )}
-      </section>
-    </section>
+      <ThemeFieldset
+        theme={activePrefs.theme}
+        onChoose={(theme) => {
+          update({ ...activePrefs, theme }, () => onThemeChange?.(theme));
+        }}
+      />
+      <BehaviorFieldset
+        shortcutsEnabled={activePrefs.shortcutsEnabled}
+        autoAdvance={activePrefs.autoAdvance}
+        onShortcutsEnabledChange={(enabled) => {
+          update({ ...activePrefs, shortcutsEnabled: enabled }, () =>
+            onShortcutsEnabledChange?.(enabled),
+          );
+        }}
+        onAutoAdvanceChange={(enabled) => {
+          update({ ...activePrefs, autoAdvance: enabled }, () => onAutoAdvanceChange?.(enabled));
+        }}
+      />
+      <PrivacyFieldset
+        rememberDiff={activePrefs.rememberDiff}
+        onRememberDiffChange={(rememberDiff) => {
+          update({ ...activePrefs, rememberDiff }, () => onRememberDiffChange?.(rememberDiff));
+        }}
+      />
+      <ClearDataSection
+        confirming={confirmingClear}
+        canClear={
+          onClearData !== undefined || onClearSavedData !== undefined || onClear !== undefined
+        }
+        onRequestClear={() => {
+          setConfirmingClear(true);
+        }}
+        onConfirmClear={() => void clearData()}
+        onCancelClear={() => {
+          setConfirmingClear(false);
+        }}
+      />
+    </div>
   );
 }

@@ -1,5 +1,7 @@
+import type { RefObject } from 'react';
 import type { DiffFile, Flag, ReviewState } from '../../core/types';
 import { selectProgress, selectReviewStats } from '../../core/review/selectors';
+import { KeyHint } from '../KeyHint';
 import {
   DEFAULT_REVIEW_FILTERS,
   Filters,
@@ -8,7 +10,7 @@ import {
   type ReviewFilters,
 } from './Filters';
 import { FileList } from './FileList';
-import { SafeText } from './SafeText';
+import { RailDisclosure, useRailDisclosure } from './RailDisclosure';
 
 export type RailNavigation =
   | 'previous-hunk'
@@ -26,7 +28,6 @@ export type ReviewRailProps = {
   readonly onFiltersChange?: (filters: ReviewFilters) => void;
   readonly currentFileId?: string | null;
   readonly currentHunkId?: string | null;
-  readonly newOrChangedHunkIds?: ReadonlySet<string>;
   readonly onSelectFile?: (fileId: string) => void;
   readonly onSelectHunk?: (hunkId: string) => void;
   readonly onNavigate?: (target: RailNavigation) => void;
@@ -36,6 +37,10 @@ export type ReviewRailProps = {
   readonly onNextPending?: () => void;
   readonly onPreviousFile?: () => void;
   readonly onNextFile?: () => void;
+  readonly pathInputRef?: RefObject<HTMLInputElement | null>;
+  /** The landmark "Skip to changed files" moves focus to. */
+  readonly navRef?: RefObject<HTMLElement | null>;
+  readonly onFilterLeave?: () => void;
 };
 
 function ProgressStrip({ files, reviewState }: Pick<ReviewRailProps, 'files' | 'reviewState'>) {
@@ -44,9 +49,7 @@ function ProgressStrip({ files, reviewState }: Pick<ReviewRailProps, 'files' | '
   return (
     <section className="review-progress" aria-labelledby="review-progress-title">
       <h2 id="review-progress-title">Review progress</h2>
-      <p>
-        <SafeText>{`${progress.reviewed} of ${progress.total} hunks decided`}</SafeText>
-      </p>
+      <p>{`${String(progress.reviewed)} of ${String(progress.total)} hunks decided`}</p>
       <div
         className="review-progress-bar"
         role="progressbar"
@@ -55,14 +58,15 @@ function ProgressStrip({ files, reviewState }: Pick<ReviewRailProps, 'files' | '
         aria-valuemax={100}
         aria-valuenow={progress.percent}
       >
-        <div className="review-progress-fill" style={{ inlineSize: `${progress.percent}%` }} />
+        <div
+          className="review-progress-fill"
+          style={{ inlineSize: `${String(progress.percent)}%` }}
+        />
       </div>
       <p className="review-progress-counts">
-        <SafeText>{`Approved ${stats.approved} · Rejected ${stats.rejected} · Pending ${stats.pending}`}</SafeText>
+        {`Approved ${String(stats.approved)} · Rejected ${String(stats.rejected)} · Pending ${String(stats.pending)}`}
       </p>
-      <p className="review-progress-verdict">
-        <SafeText>{stats.verdict}</SafeText>
-      </p>
+      <p className="review-progress-verdict">{stats.verdict}</p>
     </section>
   );
 }
@@ -86,7 +90,8 @@ function NavigationButton({
         onClick?.();
       }}
     >
-      <SafeText>{label}</SafeText>
+      {label}
+      <KeyHint command={target} />
     </button>
   );
 }
@@ -153,7 +158,6 @@ export function ReviewRail({
   onFiltersChange,
   currentFileId,
   currentHunkId,
-  newOrChangedHunkIds = new Set<string>(),
   onSelectFile,
   onSelectHunk,
   onNavigate,
@@ -163,43 +167,62 @@ export function ReviewRail({
   onNextPending,
   onPreviousFile,
   onNextFile,
+  pathInputRef,
+  navRef,
+  onFilterLeave,
 }: ReviewRailProps) {
-  const visibleFiles = filterFiles(files, filters, reviewState, flags, newOrChangedHunkIds);
-  const visibleHunks = countVisibleHunks(files, filters, reviewState, flags, newOrChangedHunkIds);
+  const visibleFiles = filterFiles(files, filters, reviewState, flags);
+  const visibleHunks = countVisibleHunks(files, filters, reviewState, flags);
   const totalHunks = files.reduce((sum, file) => sum + file.hunks.length, 0);
+  const disclosure = useRailDisclosure();
   return (
     <aside className="review-rail" aria-label="Review rail">
       <ProgressStrip files={files} reviewState={reviewState} />
-      <nav aria-label="Changed files">
-        <Filters
-          value={filters}
-          onChange={(nextFilters) => {
-            onFiltersChange?.(nextFilters);
-          }}
-          fileCount={visibleFiles.length}
-          totalFileCount={files.length}
-          hunkCount={visibleHunks}
-          totalHunkCount={totalHunks}
-        />
-        <FileList
-          files={visibleFiles}
-          reviewState={reviewState}
-          flags={flags}
-          currentFileId={currentFileId}
-          currentHunkId={currentHunkId}
-          onSelectFile={onSelectFile}
-          onSelectHunk={onSelectHunk}
+      <nav aria-label="Changed files" ref={navRef} tabIndex={-1}>
+        <RailDisclosure fileCount={files.length} state={disclosure}>
+          <Filters
+            value={filters}
+            onChange={(nextFilters) => {
+              onFiltersChange?.(nextFilters);
+            }}
+            fileCount={visibleFiles.length}
+            totalFileCount={files.length}
+            hunkCount={visibleHunks}
+            totalHunkCount={totalHunks}
+            inputRef={pathInputRef}
+            onLeave={onFilterLeave}
+            showNewOrChanged={reviewState.prior !== null}
+          />
+          <FileList
+            files={visibleFiles}
+            reviewState={reviewState}
+            flags={flags}
+            currentFileId={currentFileId}
+            currentHunkId={currentHunkId}
+            onSelectFile={(fileId) => {
+              disclosure.collapse();
+              onSelectFile?.(fileId);
+            }}
+            onSelectHunk={
+              onSelectHunk === undefined
+                ? undefined
+                : (hunkId) => {
+                    disclosure.collapse();
+                    onSelectHunk(hunkId);
+                  }
+            }
+          />
+        </RailDisclosure>
+        <HunkNavigation
+          onNavigate={onNavigate}
+          onPreviousHunk={onPreviousHunk}
+          onNextHunk={onNextHunk}
+          onPreviousPending={onPreviousPending}
+          onNextPending={onNextPending}
+          onPreviousFile={onPreviousFile}
+          onNextFile={onNextFile}
         />
       </nav>
-      <HunkNavigation
-        onNavigate={onNavigate}
-        onPreviousHunk={onPreviousHunk}
-        onNextHunk={onNextHunk}
-        onPreviousPending={onPreviousPending}
-        onNextPending={onNextPending}
-        onPreviousFile={onPreviousFile}
-        onNextFile={onNextFile}
-      />
     </aside>
   );
 }

@@ -20,10 +20,8 @@ export type ReviewProgress = {
 
 export type HunkSource = readonly Hunk[] | readonly DiffFile[];
 
-const own = Object.prototype.hasOwnProperty;
-
 function isReviewState(value: HunkSource | ReviewState): value is ReviewState {
-  return !Array.isArray(value) && typeof value === 'object' && value !== null && 'hunkIds' in value;
+  return !Array.isArray(value) && typeof value === 'object' && 'hunkIds' in value;
 }
 
 export function flattenHunks(source: HunkSource): readonly Hunk[] {
@@ -53,7 +51,7 @@ function resolveInputs(
 }
 
 function reviewFor(state: ReviewState, id: string) {
-  return own.call(state.hunks, id) ? state.hunks[id] : undefined;
+  return Object.hasOwn(state.hunks, id) ? state.hunks[id] : undefined;
 }
 
 export function selectDecision(state: ReviewState, id: string): 'approved' | 'rejected' | null {

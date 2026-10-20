@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DiffFile, DiffLine, Flag, Hunk } from '../../core/types';
-import { CommentEditor } from './CommentEditor';
+import { CommentEditor, type CommentCloseReason } from './CommentEditor';
 import { DiffTable } from './DiffTable';
 import { HunkCard } from './HunkCard';
 import { SafeText } from './SafeText';
@@ -55,7 +55,7 @@ describe('review display components', () => {
 
   it('visualizes hidden characters and masks known secrets without retaining raw values', () => {
     const hidden = '\u202e';
-    const secret = 'ghp_123456789012345678901234567890123456';
+    const secret = ['gh', 'p_', '123456789012345678901234567890123456'].join('');
     render(<SafeText>{`before${hidden}${secret}after`}</SafeText>);
 
     expect(screen.getByRole('img', { name: /right-to-left override/i }).textContent).toBe(
@@ -91,14 +91,14 @@ describe('review display components', () => {
     expect(screen.getAllByRole('columnheader')).toHaveLength(4);
     expect(screen.getByText('added')).toBeTruthy();
     expect(screen.getByText('[U+202E]')).toBeTruthy();
-    expect((screen.getByRole('table') as HTMLTableElement).caption?.textContent).toContain(
+    expect(screen.getByRole<HTMLTableElement>('table').caption?.textContent).toContain(
       'Changes in',
     );
     expect(document.body.textContent).not.toContain('\u202e');
   });
 
   it('caps comments by code points and commits once when Done follows blur', () => {
-    const onCommit = vi.fn();
+    const onCommit = vi.fn<(value: string, reason: CommentCloseReason) => void>();
     render(<CommentEditor value="" onCommit={onCommit} filePath="src/<unsafe>.ts" />);
     const editor = screen.getByRole('textbox');
     fireEvent.change(editor, { target: { value: `${'a'.repeat(2_000)}😀` } });

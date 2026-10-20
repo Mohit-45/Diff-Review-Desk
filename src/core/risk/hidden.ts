@@ -1,3 +1,5 @@
+import { countWork } from './scanWork';
+
 export type HiddenScanOptions = {
   readonly isPath?: boolean;
   readonly isNewFile?: boolean;
@@ -97,62 +99,123 @@ function nextCodePoint(text: string, end: number): number | null {
   return text.codePointAt(end) ?? null;
 }
 
-function isBenign(
-  text: string,
-  start: number,
-  end: number,
-  codePoint: number,
-  options: HiddenScanOptions,
-): boolean {
+type HiddenCandidate = {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  readonly codePoint: number;
+};
+
+function isLeadingBom(candidate: HiddenCandidate, options: HiddenScanOptions): boolean {
+  return (
+    candidate.codePoint === 0xfeff &&
+    options.isNewFile === true &&
+    options.lineNumber === 1 &&
+    candidate.start === 0
+  );
+}
+
+function isDirectionalMark(codePoint: number): boolean {
+  return codePoint === 0x200e || codePoint === 0x200f;
+}
+
+/** ZWNJ/ZWJ next to an emoji or inside Arabic, Hebrew and Indic text is ordinary shaping. */
+function isShapingJoiner(candidate: HiddenCandidate): boolean {
+  if (candidate.codePoint !== 0x200c && candidate.codePoint !== 0x200d) {
+    return false;
+  }
+  const neighbours = [
+    previousCodePoint(candidate.text, candidate.start),
+    nextCodePoint(candidate.text, candidate.end),
+  ];
+  return neighbours.some(
+    (neighbour) => neighbour !== null && (isEmojiBase(neighbour) || isArabicHebrewIndic(neighbour)),
+  );
+}
+
+function isEmojiVariationSelector(candidate: HiddenCandidate): boolean {
+  const { codePoint } = candidate;
+  const isVariationSelector =
+    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) || (codePoint >= 0xe0100 && codePoint <= 0xe01ef);
+  if (!isVariationSelector) {
+    return false;
+  }
+  const previous = previousCodePoint(candidate.text, candidate.start);
+  return previous !== null && isEmojiBase(previous);
+}
+
+function isBenign(candidate: HiddenCandidate, options: HiddenScanOptions): boolean {
   if (options.isPath || options.allowBenignExemptions === false) {
     return false;
   }
-  if (codePoint === 0xfeff && options.isNewFile && options.lineNumber === 1 && start === 0) {
-    return true;
-  }
-  if (codePoint === 0x200e || codePoint === 0x200f) {
-    return true;
-  }
-  const previous = previousCodePoint(text, start);
-  const next = nextCodePoint(text, end);
-  if (
-    (codePoint === 0x200c || codePoint === 0x200d) &&
-    ((previous !== null && isEmojiBase(previous)) ||
-      (next !== null && isEmojiBase(next)) ||
-      (previous !== null && isArabicHebrewIndic(previous)) ||
-      (next !== null && isArabicHebrewIndic(next)))
-  ) {
-    return true;
-  }
-  const isVariationSelector =
-    (codePoint >= 0xfe00 && codePoint <= 0xfe0f) || (codePoint >= 0xe0100 && codePoint <= 0xe01ef);
-  return isVariationSelector && previous !== null && isEmojiBase(previous);
+  return (
+    isLeadingBom(candidate, options) ||
+    isDirectionalMark(candidate.codePoint) ||
+    isShapingJoiner(candidate) ||
+    isEmojiVariationSelector(candidate)
+  );
 }
 
+const HIDDEN_LABELS: Readonly<Record<number, string>> = {
+  0x202a: 'left-to-right embedding',
+  0x202b: 'right-to-left embedding',
+  0x202c: 'pop directional formatting',
+  0x202d: 'left-to-right override',
+  0x202e: 'right-to-left override',
+  0x2066: 'left-to-right isolate',
+  0x2067: 'right-to-left isolate',
+  0x2068: 'first strong isolate',
+  0x2069: 'pop directional isolate',
+  0x200b: 'zero width space',
+  0x200c: 'zero width non-joiner',
+  0x200d: 'zero width joiner',
+  0x2060: 'word joiner',
+  0xfeff: 'byte order mark',
+  0x2028: 'line separator',
+  0x2029: 'paragraph separator',
+};
+
 export function hiddenLabel(codePoint: number): string {
-  const names: Readonly<Record<number, string>> = {
-    0x202a: 'left-to-right embedding',
-    0x202b: 'right-to-left embedding',
-    0x202c: 'pop directional formatting',
-    0x202d: 'left-to-right override',
-    0x202e: 'right-to-left override',
-    0x2066: 'left-to-right isolate',
-    0x2067: 'right-to-left isolate',
-    0x2068: 'first strong isolate',
-    0x2069: 'pop directional isolate',
-    0x200b: 'zero width space',
-    0x200c: 'zero width non-joiner',
-    0x200d: 'zero width joiner',
-    0x2060: 'word joiner',
-    0xfeff: 'byte order mark',
-    0x2028: 'line separator',
-    0x2029: 'paragraph separator',
-  };
-  return names[codePoint] ?? 'hidden or control character';
+  return HIDDEN_LABELS[codePoint] ?? 'hidden or control character';
 }
 
 export function codePointText(codePoint: number): string {
   return `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+/**
+ * One pass over the text. `onSpan` returns true to stop early, so a caller that
+ * only needs to know whether anything is hidden does not build a span per character.
+ */
+function scanHidden(
+  text: string,
+  options: HiddenScanOptions,
+  onSpan: (span: HiddenSpan) => boolean,
+): void {
+  let steps = 0;
+  for (let start = 0; start < text.length;) {
+    steps += 1;
+    const codePoint = text.codePointAt(start);
+    if (codePoint === undefined) {
+      break;
+    }
+    const end = start + (codePoint > 0xffff ? 2 : 1);
+    if (
+      isHiddenCodePoint(codePoint) &&
+      !isBenign({ text, start, end, codePoint }, options) &&
+      onSpan({
+        start,
+        end,
+        codePoint,
+        codePointText: codePointText(codePoint),
+        label: hiddenLabel(codePoint),
+      })
+    ) {
+      break;
+    }
+    start = end;
+  }
+  countWork(steps);
 }
 
 export function findHiddenSpans(
@@ -160,22 +223,18 @@ export function findHiddenSpans(
   options: HiddenScanOptions = {},
 ): readonly HiddenSpan[] {
   const spans: HiddenSpan[] = [];
-  for (let start = 0; start < text.length;) {
-    const codePoint = text.codePointAt(start);
-    if (codePoint === undefined) {
-      break;
-    }
-    const end = start + (codePoint > 0xffff ? 2 : 1);
-    if (isHiddenCodePoint(codePoint) && !isBenign(text, start, end, codePoint, options)) {
-      spans.push({
-        start,
-        end,
-        codePoint,
-        codePointText: codePointText(codePoint),
-        label: hiddenLabel(codePoint),
-      });
-    }
-    start = end;
-  }
+  scanHidden(text, options, (span) => {
+    spans.push(span);
+    return false;
+  });
   return spans;
+}
+
+export function hasHiddenSpan(text: string, options: HiddenScanOptions = {}): boolean {
+  let found = false;
+  scanHidden(text, options, () => {
+    found = true;
+    return true;
+  });
+  return found;
 }

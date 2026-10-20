@@ -1,21 +1,22 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { CarryBadge } from '../../app/carryFacts';
 import type { DiffFile, Flag, Hunk, HunkReview, ReviewState } from '../../core/types';
 import { selectHunkReview } from '../../core/review/selectors';
+import { isSensitiveFile, maskHunk } from '../hunkMasking';
+import { hunkMessages } from '../messages/hunk';
+import { CarryBadges } from './CarryBadges';
 import { SafeText } from './SafeText';
+import { CommentEditor, type CommentCloseReason } from './CommentEditor';
 import {
-  ApprovedIcon,
-  CommentIcon,
-  InfoIcon,
-  PendingIcon,
-  RejectedIcon,
-  RiskHighIcon,
-  RiskLowIcon,
-  RiskMediumIcon,
-} from './Icons';
-import { CommentEditor } from './CommentEditor';
-import { DiffTable } from './DiffTable';
-
-type Decision = HunkReview['decision'];
+  FlagSection,
+  HunkBody,
+  HunkHeader,
+  hunkSummary,
+  pathFor,
+  relevantFlagsFor,
+  type Decision,
+} from './HunkCardParts';
+import { HunkToolbar } from './HunkToolbar';
 
 export type HunkCardProps = {
   readonly hunk: Hunk;
@@ -31,6 +32,20 @@ export type HunkCardProps = {
   readonly collapsed?: boolean;
   readonly defaultCollapsed?: boolean;
   readonly onCollapseChange?: (collapsed: boolean) => void;
+  /** Whether this hunk shows its secrets as typed. Session memory only, never saved. */
+  readonly revealed?: boolean;
+  readonly onRevealChange?: (revealed: boolean) => void;
+  /** Controlled comment editor; without it the card keeps its own open state. */
+  readonly editing?: boolean;
+  readonly onEditingChange?: (editing: boolean) => void;
+  readonly onCommentClose?: (reason: CommentCloseReason) => void;
+  /** Every keystroke in the open editor, before it commits, so the screen can tell a draft is at risk. */
+  readonly onDraftChange?: (text: string) => void;
+  /** True for the one hunk that holds the roving tab stop. */
+  readonly current?: boolean;
+  /** Fires when focus lands anywhere inside the card, so the screen can track the current hunk. */
+  readonly onFocusHunk?: () => void;
+  readonly articleRef?: (element: HTMLElement | null) => void;
   readonly onDecision?: (decision: Decision) => void;
   readonly onReviewChange?: (review: HunkReview) => void;
   readonly onApprove?: () => void;
@@ -39,325 +54,221 @@ export type HunkCardProps = {
   readonly onComment?: (comment: string) => void;
   readonly onCommentOpen?: () => void;
   readonly className?: string;
+  /** Where this hunk stands against the previous round; absent in round 1. */
+  readonly carry?: CarryBadge | null;
 };
 
-function pathFor(file: DiffFile | undefined, filePath: string | undefined): string {
-  return filePath ?? file?.displayPath ?? file?.newPath ?? file?.oldPath ?? 'diff';
+/** A prop wins when the parent supplies it; otherwise the card keeps its own copy. */
+function useControllable<T>(
+  controlled: T | undefined,
+  initial: T,
+  onChange: ((next: T) => void) | undefined,
+): readonly [T, (next: T) => void] {
+  const [local, setLocal] = useState(initial);
+  const set = (next: T) => {
+    setLocal(next);
+    onChange?.(next);
+  };
+  return [controlled ?? local, set];
 }
 
-function hunkLines(hunk: Hunk): { readonly start: number; readonly end: number } {
-  const start = Math.min(hunk.oldStart, hunk.newStart);
-  const oldEnd = hunk.oldCount === 0 ? hunk.oldStart : hunk.oldStart + hunk.oldCount - 1;
-  const newEnd = hunk.newCount === 0 ? hunk.newStart : hunk.newStart + hunk.newCount - 1;
-  return { start, end: Math.max(oldEnd, newEnd) };
-}
-
-function metaReason(reason: Hunk['meta'][number]): string {
-  switch (reason) {
-    case 'rename':
-      return 'This file was renamed; there are no line changes to review.';
-    case 'copy':
-      return 'This file was copied; there are no line changes to review.';
-    case 'mode-change':
-      return 'This hunk records a file mode change.';
-    case 'type-change':
-      return 'This hunk records a file type change.';
-    case 'binary':
-      return 'This is a binary change and has no text diff to display.';
-    case 'empty-file':
-      return 'This hunk records an empty file.';
-    case 'no-hunks':
-      return 'This file has no text hunks.';
-    case 'content-omitted':
-      return 'The file content was omitted from the diff.';
-    case 'combined':
-      return 'This combined diff is shown as metadata.';
-    case 'unparsed':
-      return 'Some diff lines could not be parsed. Review them as raw text.';
-  }
-}
-
-function flagIcon(severity: Flag['severity']) {
-  if (severity === 'high') {
-    return <RiskHighIcon />;
-  }
-  if (severity === 'medium') {
-    return <RiskMediumIcon />;
-  }
-  return <RiskLowIcon />;
-}
-
-function decisionIcon(decision: Decision) {
-  if (decision === 'approved') {
-    return <ApprovedIcon />;
-  }
-  if (decision === 'rejected') {
-    return <RejectedIcon />;
-  }
-  return <PendingIcon />;
-}
-
-function decisionLabel(decision: Decision): string {
-  if (decision === 'approved') {
-    return 'Approved';
-  }
-  if (decision === 'rejected') {
-    return 'Rejected';
-  }
-  return 'Pending';
-}
-
-function highestSeverity(flags: readonly Flag[]): Flag['severity'] | null {
-  if (flags.some((flag) => flag.severity === 'high')) {
-    return 'high';
-  }
-  if (flags.some((flag) => flag.severity === 'medium')) {
-    return 'medium';
-  }
-  if (flags.some((flag) => flag.severity === 'low')) {
-    return 'low';
-  }
-  return null;
-}
-
-export function HunkCard({
-  hunk,
-  file,
-  filePath,
-  hunkNumber = hunk.index + 1,
-  totalHunks = hunkNumber,
-  flags = [],
-  review,
-  reviewState,
-  decision,
-  comment,
-  collapsed: controlledCollapsed,
-  defaultCollapsed = false,
-  onCollapseChange,
-  onDecision,
-  onReviewChange,
-  onApprove,
-  onReject,
-  onClear,
-  onComment,
-  onCommentOpen,
-  className,
-}: HunkCardProps) {
-  const headingId = useId();
-  const summaryId = useId();
-  const fileHeadingId = useId();
-  const [localCollapsed, setLocalCollapsed] = useState(defaultCollapsed);
+function useHunkReview(props: HunkCardProps) {
+  const { hunk, review, reviewState, decision, comment } = props;
   const [localReview, setLocalReview] = useState<HunkReview>({
     decision: decision ?? null,
     comment: comment ?? '',
   });
-  const [editingComment, setEditingComment] = useState(false);
-  const path = pathFor(file, filePath);
-  const selectedReview =
-    reviewState === undefined ? undefined : selectHunkReview(reviewState, hunk.id);
-  const currentReview = review ?? selectedReview ?? localReview;
-  const currentDecision = decision !== undefined ? decision : currentReview.decision;
-  const currentComment = comment !== undefined ? comment : currentReview.comment;
-  const isCollapsed = controlledCollapsed ?? localCollapsed;
-  const relevantFlags = flags.filter((flag) => {
-    if (file !== undefined && flag.fileId !== file.id) {
-      return false;
-    }
-    return flag.hunkId === null || flag.hunkId === hunk.id;
-  });
-  const highest = highestSeverity(relevantFlags);
-  const range = hunkLines(hunk);
-  const summary = `${decisionLabel(currentDecision)}. ${relevantFlags.length} flag${relevantFlags.length === 1 ? '' : 's'}, highest ${highest ?? 'none'}. Comment: ${currentComment.trim().length > 0 ? 'yes' : 'no'}.`;
-  const articleClass = className === undefined ? 'hunk' : `hunk ${className}`;
+  const standalone =
+    review === undefined &&
+    reviewState === undefined &&
+    decision === undefined &&
+    comment === undefined;
+  const selected = reviewState === undefined ? undefined : selectHunkReview(reviewState, hunk.id);
+  const base = review ?? selected ?? localReview;
+  const current: HunkReview = {
+    decision: decision !== undefined ? decision : base.decision,
+    comment: comment !== undefined ? comment : base.comment,
+  };
 
   const setDecision = (next: Decision) => {
-    const nextReview = { decision: next, comment: currentComment };
-    if (
-      review === undefined &&
-      reviewState === undefined &&
-      decision === undefined &&
-      comment === undefined
-    ) {
+    const nextReview = { decision: next, comment: current.comment };
+    if (standalone) {
       setLocalReview(nextReview);
     }
-    onDecision?.(next);
-    onReviewChange?.(nextReview);
+    props.onDecision?.(next);
+    props.onReviewChange?.(nextReview);
   };
 
-  const chooseDecision = (next: Exclude<Decision, null>) => {
-    const cleared = currentDecision === next;
-    if (cleared) {
-      onClear?.();
-      setDecision(null);
+  const setComment = (next: string) => {
+    if (standalone) {
+      setLocalReview({ decision: current.decision, comment: next });
+    }
+    props.onComment?.(next);
+    props.onReviewChange?.({ decision: current.decision, comment: next });
+  };
+
+  return { ...current, setDecision, setComment };
+}
+
+/** The saved comment, or the reminder that a rejected hunk has none. */
+function HunkNote({
+  decision,
+  comment,
+}: {
+  readonly decision: Decision;
+  readonly comment: string;
+}) {
+  if (comment.length > 0) {
+    return (
+      <p className="hunk-comment">
+        <strong>Comment:</strong> <SafeText>{comment}</SafeText>
+      </p>
+    );
+  }
+  return decision === 'rejected' ? (
+    <p className="hunk-no-comment">{hunkMessages.noCommentYet}</p>
+  ) : null;
+}
+
+export function HunkCard(props: HunkCardProps) {
+  const { hunk, file, flags = [], current = false, onFocusHunk, articleRef } = props;
+  const hunkNumber = props.hunkNumber ?? hunk.index + 1;
+  const totalHunks = props.totalHunks ?? hunkNumber;
+  const headingId = useId();
+  const summaryId = useId();
+  const fileHeadingId = useId();
+  const commentRef = useRef<HTMLButtonElement>(null);
+  const approveRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  const focusTable = useRef(false);
+  const review = useHunkReview(props);
+  const [collapsed, setCollapsed] = useControllable(
+    props.collapsed,
+    props.defaultCollapsed ?? false,
+    props.onCollapseChange,
+  );
+  const [editing, setEditing] = useControllable(props.editing, false, props.onEditingChange);
+  const [revealed, setRevealed] = useControllable(props.revealed, false, props.onRevealChange);
+  const path = pathFor(file, props.filePath);
+  const rovingTabIndex = current ? 0 : -1;
+  const relevantFlags = relevantFlagsFor(flags, file, hunk);
+  const hasMasked = maskHunk(hunk, isSensitiveFile(file, props.filePath)).hasMasked;
+
+  // Closing the editor by hand puts focus back on Comment; a blur must not steal it.
+  useEffect(() => {
+    if (!editing && returnFocus.current) {
+      returnFocus.current = false;
+      commentRef.current?.focus();
+    }
+  }, [editing]);
+
+  const choose = (next: 'approved' | 'rejected') => {
+    if (review.decision === next) {
+      props.onClear?.();
+      review.setDecision(null);
       return;
     }
-    if (next === 'approved') {
-      onApprove?.();
-    } else {
-      onReject?.();
-    }
-    setDecision(next);
+    (next === 'approved' ? props.onApprove : props.onReject)?.();
+    review.setDecision(next);
     if (next === 'rejected') {
-      setEditingComment(true);
+      setEditing(true);
     }
   };
 
-  const commitComment = (next: string) => {
-    if (
-      review === undefined &&
-      reviewState === undefined &&
-      decision === undefined &&
-      comment === undefined
-    ) {
-      setLocalReview({ decision: currentDecision, comment: next });
-    }
-    onComment?.(next);
-    onReviewChange?.({ decision: currentDecision, comment: next });
-    setEditingComment(false);
-  };
-
-  const toggleCollapsed = () => {
-    const next = !isCollapsed;
-    if (controlledCollapsed === undefined) {
-      setLocalCollapsed(next);
-    }
-    onCollapseChange?.(next);
+  const closeEditor = (next: string, reason: CommentCloseReason) => {
+    review.setComment(next);
+    returnFocus.current = reason !== 'blur';
+    setEditing(false);
+    props.onCommentClose?.(reason);
   };
 
   return (
     <article
-      className={articleClass}
+      ref={articleRef}
+      className={props.className === undefined ? 'hunk' : `hunk ${props.className}`}
       aria-labelledby={`${fileHeadingId} ${headingId}`}
       aria-describedby={summaryId}
-      tabIndex={-1}
+      aria-current={current ? 'true' : undefined}
+      tabIndex={rovingTabIndex}
+      onFocusCapture={() => {
+        onFocusHunk?.();
+      }}
     >
       <h2 id={fileHeadingId}>
         <SafeText>{path}</SafeText>
       </h2>
       <div id={summaryId} className="sr-only">
-        {summary}
+        {hunkSummary(review.decision, relevantFlags, review.comment)}
       </div>
-      <header className="hunk-header">
-        <h3 id={headingId}>
-          Hunk {hunkNumber} of {totalHunks}, lines {range.start}–{range.end}
-        </h3>
-        <span className={`decision decision-${currentDecision ?? 'pending'}`}>
-          {decisionIcon(currentDecision)}
-          <span>{decisionLabel(currentDecision)}</span>
-        </span>
-      </header>
-
-      {relevantFlags.length > 0 ? (
-        <div className="risk-chips" aria-label="Risk flags">
-          {relevantFlags.map((flag, index) => (
-            <span className={`risk-chip risk-${flag.severity}`} key={`${flag.ruleId}-${index}`}>
-              {flagIcon(flag.severity)}
-              <SafeText>{flag.severity}</SafeText>
-              <SafeText>{flag.title}</SafeText>
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      {relevantFlags.length > 0 ? (
-        <details className="flag-details">
-          <summary>Why flagged ({relevantFlags.length})</summary>
-          <ul>
-            {relevantFlags.map((flag, index) => (
-              <li key={`${flag.ruleId}-detail-${index}`}>
-                <strong>
-                  <SafeText>{flag.title}</SafeText>
-                </strong>
-                <p>
-                  <SafeText>{flag.why}</SafeText>
-                </p>
-                {flag.evidence === undefined ? null : (
-                  <p className="flag-evidence">
-                    <SafeText>{flag.evidence}</SafeText>
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : (
-        <p className="no-flags">
-          <InfoIcon /> No heuristic flags matched.
-        </p>
-      )}
-
-      <div className="hunk-toolbar" aria-label="Hunk actions">
-        <button
-          type="button"
-          aria-pressed={currentDecision === 'approved'}
-          onClick={() => {
-            chooseDecision('approved');
-          }}
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          aria-pressed={currentDecision === 'rejected'}
-          onClick={() => {
-            chooseDecision('rejected');
-          }}
-        >
-          Reject
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setEditingComment(true);
-            onCommentOpen?.();
-          }}
-        >
-          <CommentIcon /> Comment
-        </button>
-        {hunk.kind === 'text' ? (
-          <button type="button" onClick={toggleCollapsed} aria-expanded={!isCollapsed}>
-            {isCollapsed ? 'Expand hunk' : 'Collapse hunk'}
-          </button>
-        ) : null}
-      </div>
-
-      {editingComment ? (
+      <HunkHeader
+        id={headingId}
+        hunk={hunk}
+        hunkNumber={hunkNumber}
+        totalHunks={totalHunks}
+        decision={review.decision}
+      />
+      <CarryBadges badge={props.carry} />
+      <FlagSection flags={relevantFlags} />
+      <HunkToolbar
+        decision={review.decision}
+        collapsed={collapsed}
+        collapsible={hunk.kind === 'text'}
+        approveRef={approveRef}
+        commentRef={commentRef}
+        onChoose={choose}
+        onClear={() => {
+          props.onClear?.();
+          review.setDecision(null);
+          approveRef.current?.focus();
+        }}
+        onComment={() => {
+          setEditing(true);
+          props.onCommentOpen?.();
+        }}
+        onToggleCollapse={() => {
+          setCollapsed(!collapsed);
+        }}
+        reveal={
+          hasMasked
+            ? {
+                revealed,
+                onToggle: () => {
+                  setRevealed(!revealed);
+                },
+              }
+            : null
+        }
+      />
+      {editing ? (
         <CommentEditor
-          value={currentComment}
-          onCommit={commitComment}
-          onClose={() => {
-            setEditingComment(false);
-          }}
+          value={review.comment}
+          onChange={props.onDraftChange}
+          onCommit={closeEditor}
           filePath={path}
           hunkNumber={hunkNumber}
           totalHunks={totalHunks}
         />
-      ) : currentComment.length > 0 ? (
-        <p className="hunk-comment">
-          <strong>Comment:</strong> <SafeText>{currentComment}</SafeText>
-        </p>
-      ) : null}
-
-      {hunk.kind === 'meta' ? (
-        <>
-          <p className="meta-hunk-message">
-            <SafeText>{metaReason(hunk.meta[0] ?? 'unparsed')}</SafeText>
-          </p>
-          {hunk.lines.length > 0 ? (
-            <pre className="meta-hunk-lines">
-              <SafeText>{hunk.lines.map((line) => line.text).join('\n')}</SafeText>
-            </pre>
-          ) : null}
-        </>
-      ) : isCollapsed ? null : (
-        <DiffTable
-          hunk={hunk}
-          file={file}
-          filePath={path}
-          hunkNumber={hunkNumber}
-          totalHunks={totalHunks}
-        />
+      ) : (
+        <HunkNote decision={review.decision} comment={review.comment} />
       )}
+      <HunkBody
+        hunk={hunk}
+        file={file}
+        path={path}
+        hunkNumber={hunkNumber}
+        totalHunks={totalHunks}
+        collapsed={collapsed}
+        revealed={revealed}
+        onShowDiff={() => {
+          focusTable.current = true;
+          setCollapsed(false);
+        }}
+        claimFocus={() => {
+          const wanted = focusTable.current;
+          focusTable.current = false;
+          return wanted;
+        }}
+      />
     </article>
   );
 }

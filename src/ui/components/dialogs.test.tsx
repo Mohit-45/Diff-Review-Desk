@@ -5,6 +5,8 @@ import { ExportDialog } from './ExportDialog';
 import { HelpDialog } from './HelpDialog';
 import { SettingsDialog } from './SettingsDialog';
 
+const SECRET = ['sk', 'live', '1234567890abcdef'].join('_');
+
 function hunk(id: string, lineText: string): Hunk {
   return {
     id,
@@ -28,7 +30,7 @@ function hunk(id: string, lineText: string): Hunk {
 }
 
 function fixture() {
-  const currentHunk = hunk('f00000000001:00000000001', 'const token = "sk_live_1234567890abcdef";');
+  const currentHunk = hunk('f00000000001:00000000001', `const token = "${SECRET}";`);
   const file: DiffFile = {
     id: 'f00000000001',
     displayPath: 'src/feature.ts',
@@ -64,15 +66,15 @@ describe('ExportDialog', () => {
     const onCopy = vi.fn<(text: string) => void>();
     render(<ExportDialog state={state} files={[file]} onCopy={onCopy} />);
 
-    const preview = screen.getByRole('textbox', { name: 'Export preview' }) as HTMLTextAreaElement;
-    expect(preview.value).toContain('[REDACTED:secret-known-token]');
-    expect(preview.value).not.toContain('sk_live_1234567890abcdef');
+    const preview = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Export preview' });
+    expect(preview.value).toContain('[REDACTED:secret-assignment]');
+    expect(preview.value).not.toContain(SECRET);
     expect(screen.getByText('Rejected hunks without a comment: 1')).toBeTruthy();
     expect(screen.getByText('Redactions applied: 1')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Markdown summary' }));
     expect(
-      (screen.getByRole('textbox', { name: 'Export preview' }) as HTMLTextAreaElement).value,
+      screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Export preview' }).value,
     ).toContain('# Diff review:');
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     await new Promise<void>((resolve) => setTimeout(resolve, 0));

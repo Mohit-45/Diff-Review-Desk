@@ -96,7 +96,7 @@ describe('range labels and excerpts', () => {
     const result = excerptDetails(hunk, null, { maxChars: 9 });
     expect(result.text).toBe('+```` and');
     expect(result.fence).toBe('`````');
-    expect([...result.text].length).toBeLessThanOrEqual(20);
+    expect(Array.from(result.text).length).toBeLessThanOrEqual(20);
   });
 });
 

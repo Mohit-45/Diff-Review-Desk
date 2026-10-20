@@ -54,8 +54,10 @@ docker build -t diff-review-desk .
 docker run --rm --network none diff-review-desk npm test
 ```
 
-The image runs as the non-root `node` user. Docker was not proven during the
-initial setup because the local Docker daemon was unavailable.
+The image runs as the non-root `node` user. On 2026-10-20 the build, the offline
+`npm test` (100 files, 1,732 tests) and a detached start with `-p 4173:4173` plus a
+`curl` for `id="root"` all succeeded locally on Docker 29.6.2 (linux/arm64), on the
+final tree of that day. The GitHub run of the same steps is the user's to confirm.
 
 ## 90-second walkthrough
 
@@ -64,7 +66,8 @@ initial setup because the local Docker daemon was unavailable.
 3. Inspect the masked secret, hidden-character chip and risk explanations.
 4. Use `j`, `a`, `r`, a comment and `Ctrl/Cmd+Enter` to review without a mouse.
 5. Open Export, choose Agent feedback, and copy the redacted prompt.
-6. Load the follow-up sample and inspect unchanged and new-or-changed badges.
+6. Press `l`, choose the follow-up sample, keep `Continue as round 2`, and read
+   the banner and the Unchanged and New or changed badges.
 
 The exact keystroke table is in `docs/DEMO.md`.
 
@@ -116,30 +119,48 @@ produce blocking guidance rather than being silently interpreted.
 
 The supported keyboard path remains available through labelled buttons when
 single-key shortcuts are disabled or screen-reader browse mode captures letters.
+Every key above has a button: the rail's Previous/Next hunk, pending and file
+buttons, the hunk toolbar (Approve, Reject, Clear decision, Comment, Collapse
+hunk, Reveal secrets), and Undo, Redo, Load diff, Export, Settings and Shortcuts
+and help in the header. Reveal secrets has no key. Single-key shortcuts can be
+turned off in Settings.
 
 ## What the agent receives
 
-Agent feedback contains rejected hunks under **Must fix**, comments and masked
+Agent feedback contains rejected hunks under **Must fix**, comments and redacted
 excerpts, non-blocking notes, and approved hunks that must remain byte-identical.
-It states that quoted diff text is data, not instructions, and never includes
-raw secrets, machine paths, author names or `file://` URLs.
+It states that quoted diff text is data, not instructions. Secrets found in the
+diff, in comments or in the overall note are replaced by `[REDACTED:<rule-id>]`,
+hidden Unicode is written as `\u{...}` escapes, and the exporter itself adds no
+machine paths, author names or file URLs. Comments and the overall note are
+exported in full; only diff excerpt lines are cut.
 
 ## Privacy
 
 Private by design. Your diff, comments and decisions never leave this browser.
 This page makes no network requests. Diff text is kept in this tab's session
-storage only when the user enables remember-diff and no secret-like content is
-detected. Decisions and comments are saved in this browser after redaction.
+storage so a reload can restore the review; Settings can turn that off, which
+deletes the stored text at once. It is withheld when secret-like content, a
+sensitive file path or a throwing rule is detected, and it is never written to
+local storage. Decisions and comments are saved in this browser after redaction.
+On screen, secret-like values and the content of sensitive files are masked until
+you press Reveal secrets on that hunk; the reveal is never saved.
 Extensions installed in a browser can still read any page, and a static host
 such as GitHub Pages cannot set response headers for this application.
 
 ## Accessibility
 
-The interface targets WCAG 2.2 AA. Automated axe checks cover six core states,
-plus keyboard focus assertions, contrast tokens and forced-colour styles. These
-checks catch only a fraction of accessibility criteria. Manual screen-reader
-testing not yet performed. Screen-reader browse mode can capture single letters,
-so labelled buttons are the supported path there. NVDA and JAWS are untested.
+The interface targets WCAG 2.2 AA. Automated axe checks (in jsdom, with
+colour-contrast, target-size and scrollable-region checks disabled there) cover the
+six core states, alongside keyboard focus assertions, contrast checks on the
+colour tokens and a static check of the forced-colour styles. These checks catch
+only a fraction of accessibility criteria. The review screen has two skip links
+(changed files, diff), the file list is one Tab stop that uses arrow keys, Home and
+End, and below 64rem the filters and file list fold into a Files disclosure. A
+built-in Chromium browser pane was used for a visual pass at 1440, 1024 and 320
+pixels wide. Manual screen-reader testing not yet performed. Screen-reader browse
+mode can capture single letters, so labelled buttons are the supported path
+there. NVDA and JAWS are untested.
 See `docs/MANUAL_QA.md` for the required keyboard, zoom, contrast, VoiceOver and
 CSP checks.
 
@@ -165,7 +186,19 @@ syntax highlighting and Web Workers.
 - Homoglyph identifiers are not detected.
 - `dependency-added` covers the specified package and requirements ecosystems.
 - GitHub Pages cannot set the production CSP response header.
-- Any feature cut at freeze will be listed here and in `docs/BUILD_LOG.md`.
+- Parsing is synchronous on the main thread. The page paints a "Reading diff"
+  state for one frame first, but a very large diff still blocks it while parsing.
+- Files of 1,000 or more body lines and generated files start folded per hunk, and
+  files over 200 hunks draw 100 at a time. These two thresholds live in
+  `src/ui/renderPlan.ts`; the other render limits are in the table above.
+- The overall note is saved, and can be undone, when its field loses focus, on
+  Esc or on Close, not on every keystroke; a tab closed mid-typing there loses the
+  uncommitted text. The unload warning covers only the open comment editor.
+- Undo carry-over returns to round 1 and also clears decisions made on the new
+  hunks, as one undo step.
+- There is no bulk approve; the 'bulk-ineligible file' signal from a throwing rule
+  has nothing to attach to.
+- Manual checks that cannot run in jsdom are listed in `docs/MANUAL_QA.md`.
 
 ## Static deploy
 
@@ -181,4 +214,4 @@ The implementation record, milestone gates and disjoint agent write-sets live in
 
 ## License
 
-MIT. The copyright holder is recorded in `LICENSE` after confirmation.
+MIT. See `LICENSE`.

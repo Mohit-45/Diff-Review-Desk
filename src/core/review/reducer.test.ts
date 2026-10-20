@@ -9,7 +9,7 @@ describe('reviewReducer', () => {
     const state = createReviewState('00000000001', ids);
     const long = '😀'.repeat(2_001);
     const capped = reviewReducer(state, { type: 'setComment', id: ids[0], comment: long });
-    expect(Array.from(capped.hunks[ids[0]?.toString() ?? '']?.comment ?? '')).toHaveLength(2_000);
+    expect(Array.from(capped.hunks[ids[0]]?.comment ?? '')).toHaveLength(2_000);
     expect(capped.hunks[ids[0]]?.comment.endsWith('😀')).toBe(true);
     const empty = reviewReducer(capped, { type: 'setComment', id: ids[0], comment: ' \n\t' });
     expect(empty.hunks[ids[0]]?.comment).toBe('');
@@ -71,7 +71,7 @@ describe('reviewReducer', () => {
     for (let index = 0; index < 102; index += 1) {
       history = reviewHistoryReducer(history, {
         type: 'setOverallNote',
-        note: truncateCodePoints(`note-${index}`, 4_000),
+        note: truncateCodePoints(`note-${String(index)}`, 4_000),
       });
     }
     expect(history.past).toHaveLength(100);

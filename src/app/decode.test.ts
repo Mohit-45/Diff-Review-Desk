@@ -55,9 +55,9 @@ describe('decode', () => {
     const empty = await decodeFile({
       name: 'empty.diff',
       size: 0,
-      arrayBuffer: async () => {
+      arrayBuffer: () => {
         reads += 1;
-        return new ArrayBuffer(0);
+        return Promise.resolve(new ArrayBuffer(0));
       },
     });
     expect(empty).toMatchObject({ ok: false, error: { code: 'empty' } });
@@ -65,9 +65,7 @@ describe('decode', () => {
     const failed = await decodeFile({
       name: 'broken.diff',
       size: 4,
-      arrayBuffer: async () => {
-        throw new Error('read');
-      },
+      arrayBuffer: () => Promise.reject(new Error('read')),
     });
     expect(failed).toMatchObject({ ok: false, error: { title: 'Could not read broken.diff' } });
   });

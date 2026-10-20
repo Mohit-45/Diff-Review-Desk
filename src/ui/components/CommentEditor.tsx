@@ -11,10 +11,16 @@ import { LIMITS } from '../../core/limits';
 import type { Hunk } from '../../core/types';
 import { SafeText } from './SafeText';
 
+/**
+ * Why the editor closed. Done and Ctrl/Cmd+Enter advance the review; Esc keeps the
+ * reviewer where they are; blur just saves, because the user already moved on.
+ */
+export type CommentCloseReason = 'done' | 'shortcut' | 'escape' | 'blur';
+
 export type CommentEditorProps = {
   readonly value: string;
   readonly onChange?: (value: string) => void;
-  readonly onCommit: (value: string) => void;
+  readonly onCommit: (value: string, reason: CommentCloseReason) => void;
   readonly onClose?: () => void;
   /** Alias for consumers that call the close action cancel. Esc still commits first. */
   readonly onCancel?: () => void;
@@ -26,6 +32,9 @@ export type CommentEditorProps = {
   readonly disabled?: boolean;
 };
 
+/** The counter is announced once when it nears the cap and once at the cap, not per key. */
+const NEAR_CAP = 1_800;
+
 function capComment(value: string): string {
   const points = Array.from(value);
   return points.length <= LIMITS.maxCommentChars
@@ -33,8 +42,11 @@ function capComment(value: string): string {
     : points.slice(0, LIMITS.maxCommentChars).join('');
 }
 
-function safePath(filePath: string | undefined): string {
-  return filePath ?? 'this file';
+function capStatus(length: number): string {
+  if (length >= LIMITS.maxCommentChars) {
+    return 'Comment limit reached.';
+  }
+  return length >= NEAR_CAP ? 'Comment is close to the 2,000 character limit.' : '';
 }
 
 export function CommentEditor({
@@ -43,7 +55,7 @@ export function CommentEditor({
   onCommit,
   onClose,
   onCancel,
-  filePath,
+  filePath = 'this file',
   hunkNumber = 1,
   totalHunks = hunkNumber,
   autoFocus = true,
@@ -52,8 +64,16 @@ export function CommentEditor({
   const [draft, setDraft] = useState(() => capComment(value));
   const committed = useRef(false);
   const lastCommittedValue = useRef<string | undefined>(undefined);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const doneRef = useRef<HTMLButtonElement>(null);
   const textareaId = useId();
   const counterId = useId();
+
+  useEffect(() => {
+    if (autoFocus) {
+      areaRef.current?.focus();
+    }
+  }, [autoFocus]);
 
   useEffect(() => {
     const next = capComment(value);
@@ -63,23 +83,15 @@ export function CommentEditor({
     }
   }, [value]);
 
-  const close = () => {
-    if (onClose !== undefined) {
-      onClose();
-    } else {
-      onCancel?.();
-    }
-  };
-
-  const commit = () => {
+  const commit = (reason: CommentCloseReason) => {
     if (committed.current) {
       return;
     }
     committed.current = true;
     const next = capComment(draft);
     lastCommittedValue.current = next;
-    onCommit(next);
-    close();
+    onCommit(next, reason);
+    (onClose ?? onCancel)?.();
   };
 
   const change = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -89,26 +101,33 @@ export function CommentEditor({
   };
 
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
+    if (event.key === 'Escape') {
       event.preventDefault();
-      commit();
+      commit('escape');
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      commit('shortcut');
     }
   };
 
-  const blur = (_event: FocusEvent<HTMLTextAreaElement>) => {
-    commit();
+  // Moving between the textarea and Done must not close the editor; only leaving it does.
+  const blur = (event: FocusEvent<HTMLElement>) => {
+    if (event.relatedTarget === areaRef.current || event.relatedTarget === doneRef.current) {
+      return;
+    }
+    commit('blur');
   };
 
   const length = Array.from(draft).length;
-  const labelPath = safePath(filePath);
 
   return (
     <div className="comment-editor">
       <label htmlFor={textareaId}>
-        Comment for the AI agent on hunk {hunkNumber} of {totalHunks} in{' '}
-        <SafeText>{labelPath}</SafeText>
+        Comment for the AI agent on hunk {String(hunkNumber)} of {String(totalHunks)} in{' '}
+        <SafeText>{filePath}</SafeText>
       </label>
       <textarea
+        ref={areaRef}
         id={textareaId}
         value={draft}
         onChange={change}
@@ -116,7 +135,6 @@ export function CommentEditor({
         onBlur={blur}
         maxLength={LIMITS.maxCommentChars}
         aria-describedby={counterId}
-        autoFocus={autoFocus}
         disabled={disabled}
         rows={4}
         spellCheck={false}
@@ -124,10 +142,26 @@ export function CommentEditor({
         autoCorrect="off"
         autoCapitalize="off"
       />
-      <span id={counterId} className="comment-counter" aria-live="polite">
-        {length.toLocaleString()} / {LIMITS.maxCommentChars.toLocaleString()}
+      <span id={counterId} className="comment-counter">
+        {length.toLocaleString('en-US')} / {LIMITS.maxCommentChars.toLocaleString('en-US')}
       </span>
-      <button type="button" className="button button-primary" onClick={commit} disabled={disabled}>
+      <span className="sr-only" role="status">
+        {capStatus(length)}
+      </span>
+      <button
+        ref={doneRef}
+        type="button"
+        className="button button-primary"
+        onMouseDown={(event) => {
+          // Keep focus in the textarea so the click still lands on Done instead of blurring first.
+          event.preventDefault();
+        }}
+        onBlur={blur}
+        onClick={() => {
+          commit('done');
+        }}
+        disabled={disabled}
+      >
         Done
       </button>
     </div>

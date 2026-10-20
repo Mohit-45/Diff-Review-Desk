@@ -29,7 +29,7 @@ jobs:
       - run: docker build -t diff-review-desk .
       - run: docker run --rm --network none diff-review-desk npm test
       - run: |
-          docker run -d --name diff-review-desk-server diff-review-desk
+          docker run -d --name diff-review-desk-server -p 4173:4173 diff-review-desk
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:4173/ | grep -q 'id="root"'; then
               docker rm -f diff-review-desk-server

@@ -81,6 +81,14 @@ export default tseslint.config(
     },
   },
   {
+    // SPEC section 14: the hand-written parser gets complexity 15 and 80 lines per function.
+    files: ['src/core/parser/**/*.ts'],
+    rules: {
+      complexity: ['error', 15],
+      'max-lines-per-function': ['error', { max: 80, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
     files: ['tests/**/*.{ts,tsx}', 'src/**/*.test.{ts,tsx}'],
     rules: {
       complexity: 'off',

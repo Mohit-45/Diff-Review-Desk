@@ -56,6 +56,9 @@ export type RiskConfig = {
 
 export const SECRET_LENGTH_BUCKET = 8;
 
+/** A flag lists at most this many line numbers. */
+export const MAX_FLAG_LINE_REFS = 20;
+
 export const P0_RULE_IDS = [
   'secret-known-token',
   'sensitive-file-added',

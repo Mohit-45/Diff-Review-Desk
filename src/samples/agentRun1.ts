@@ -22,9 +22,14 @@ diff --git a/package.json b/package.json
 index 2000000..2000001 100644
 --- a/package.json
 +++ b/package.json
-@@ -1,1 +1,2 @@
- {"name":"fictional-agent","version":"1.0.0"}
-+{"dependencies":{"review-helper":"1.0.0"}}
+@@ -1,6 +1,7 @@
+ {
+   "name": "fictional-agent",
+   "version": "1.0.0",
+   "dependencies": {
++    "review-helper": "1.0.0"
+   }
+ }
 diff --git a/package-lock.json b/package-lock.json
 index 3000000..3000001 100644
 --- a/package-lock.json

@@ -1,5 +1,6 @@
 import { LIMITS } from '../limits';
 import type { DiffFile, Hunk } from '../types';
+import { longestBacktickRun } from './escape';
 import { redactHunkLines } from './redact';
 
 export type ExcerptOptions = {
@@ -13,20 +14,6 @@ export type ExcerptResult = {
   readonly omitted: number;
   readonly redactions: number;
 };
-
-function longestBacktickRun(value: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const character of value) {
-    if (character === '`') {
-      current += 1;
-      longest = Math.max(longest, current);
-    } else {
-      current = 0;
-    }
-  }
-  return longest;
-}
 
 export function fenceForExcerpt(value: string): string {
   const length = Math.min(200, Math.max(3, longestBacktickRun(value) + 1));
@@ -67,7 +54,7 @@ export function excerptDetails(
   });
   const omitted = Math.max(0, indexes.length - selected.length);
   if (omitted > 0) {
-    body.push(`... ${omitted} more lines`);
+    body.push(`... ${String(omitted)} more lines`);
   }
   const text = body.join('\n');
   return {

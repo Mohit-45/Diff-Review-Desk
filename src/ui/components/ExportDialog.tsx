@@ -1,16 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DiffFile, Flag, ParseWarning, ReviewState } from '../../core/types';
 import { LIMITS } from '../../core/limits';
-import { generateAgentFeedback } from '../../core/export/agentFeedback';
-import { exportEntries, normalizeExportInput } from '../../core/export/model';
-import { exportFilename, type ExportFilenameKind } from '../../core/export/filename';
-import { generateMarkdownSummary } from '../../core/export/summary';
-import { isSensitivePath, redactTextWithCount } from '../../core/export/redact';
-import { selectReviewStats } from '../../core/review/selectors';
+import { truncateCodePoints } from '../../core/review/reducer';
+import { DIALOG_TITLE_IDS } from '../dialogIds';
+import { copyText, downloadText } from './exportClipboard';
+import type { ExportFormat, ExportWarningTarget } from './exportTypes';
+import { ExportNotes, FormatFieldset, OverallNoteField, PreviewFields } from './ExportSections';
+import { useExportPreview } from './useExportPreview';
 
-export type ExportFormat = 'agent-feedback' | 'summary';
-
-export type ExportWarningTarget = 'pending' | 'rejected-comment' | 'parse-notes' | 'redactions';
+export type { ExportFormat, ExportWarningTarget } from './exportTypes';
 
 export type ExportDialogProps = {
   readonly state?: ReviewState;
@@ -26,6 +24,11 @@ export type ExportDialogProps = {
   readonly open?: boolean;
   readonly overallNote?: string;
   readonly onOverallNoteChange?: (note: string) => void;
+  /**
+   * The typed note, once per edit session: on blur, on Esc and on Close. The review keeps it as
+   * one undo step instead of one per keystroke.
+   */
+  readonly onOverallNoteCommit?: (note: string) => void;
   readonly onFormatChange?: (format: ExportFormat) => void;
   readonly onClose?: () => void;
   readonly onCopy?: (text: string) => void | Promise<void>;
@@ -35,97 +38,47 @@ export type ExportDialogProps = {
   readonly onNavigate?: (target: ExportWarningTarget) => void;
 };
 
-type ExportWarning = {
-  readonly target: ExportWarningTarget;
-  readonly label: string;
-  readonly count: number;
+type ExportPanelProps = Omit<ExportDialogProps, 'state' | 'reviewState'> & {
+  readonly reviewState: ReviewState;
 };
 
-const EMPTY_REVIEW_STATE: ReviewState = {
-  fingerprint: '',
-  round: 0,
-  label: 'Review',
-  overallNote: '',
-  hunks: {},
-  hunkIds: [],
-  prior: null,
-};
+// Stable defaults: a fresh `[]` per render would defeat the preview memoization.
+const NO_FLAGS: readonly Flag[] = [];
+const NO_WARNINGS: readonly ParseWarning[] = [];
 
-function countRedactions(
-  state: ReviewState,
-  files: readonly DiffFile[],
-  flags: readonly Flag[],
-  warnings: readonly ParseWarning[] | readonly string[],
-): number {
-  let count = 0;
-  const add = (value: string | null | undefined) => {
-    if (value !== null && value !== undefined && value.length > 0) {
-      count += redactTextWithCount(value).count;
-    }
-  };
-
-  add(state.label);
-  add(state.overallNote);
-  for (const file of files) {
-    add(file.displayPath);
-    add(file.oldPath);
-    add(file.newPath);
-    for (const hunk of file.hunks) {
-      add(hunk.header);
-      add(hunk.section);
-      for (const line of hunk.lines) {
-        const result = redactTextWithCount(line.text, {
-          sensitiveFile: isSensitivePath(file.displayPath),
-        });
-        count += result.count;
-      }
-    }
-  }
-  for (const flag of flags) {
-    add(flag.title);
-    add(flag.why);
-    add(flag.evidence);
-  }
-  for (const warning of warnings) {
-    add(typeof warning === 'string' ? warning : warning.message);
-  }
-  for (const review of Object.values(state.hunks)) {
-    add(review.comment);
-  }
-  return count;
-}
-
-function fallbackCopy(preview: HTMLTextAreaElement): boolean {
-  if (typeof document.execCommand !== 'function') {
-    return false;
-  }
-  preview.focus();
-  preview.select();
-  try {
-    return document.execCommand('copy');
-  } catch {
-    return false;
-  }
-}
-
-function defaultTime(generatedAt: string | undefined, time: string | undefined): string {
-  return generatedAt ?? time ?? '';
-}
+const COPIED_MESSAGE = 'Copied export to clipboard.';
+const SELECT_MANUALLY_MESSAGE =
+  "Couldn't copy automatically. The text is selected: press Ctrl+C (Cmd+C on Mac).";
+const DOWNLOAD_STARTED_MESSAGE = 'Download started.';
+const DOWNLOAD_BLOCKED_MESSAGE =
+  'If nothing downloaded, your browser may be blocking it. Use Copy instead.';
 
 function clipNote(value: string): string {
-  return [...value].slice(0, LIMITS.maxOverallNoteChars).join('');
+  return truncateCodePoints(value, LIMITS.maxOverallNoteChars);
 }
 
 /**
  * Export controls and preview. The surrounding App/Dialog owns showModal,
  * focus restoration and lifecycle; this component only exposes callbacks.
  */
-export function ExportDialog({
-  state,
-  reviewState: reviewStateProp,
+export function ExportDialog({ state, reviewState, ...panelProps }: ExportDialogProps) {
+  const current = state ?? reviewState;
+  if (current === undefined) {
+    return (
+      <div className="dialog-content">
+        <h2 id={DIALOG_TITLE_IDS.export}>Export review</h2>
+        <p>No review is loaded.</p>
+      </div>
+    );
+  }
+  return <ExportPanel {...panelProps} reviewState={current} />;
+}
+
+function ExportPanel({
+  reviewState,
   files,
-  flags = [],
-  warnings = [],
+  flags = NO_FLAGS,
+  warnings = NO_WARNINGS,
   generatedAt,
   time,
   format,
@@ -133,65 +86,38 @@ export function ExportDialog({
   onFormatChange,
   overallNote,
   onOverallNoteChange,
+  onOverallNoteCommit,
   onClose,
   onCopy,
   onDownload,
   onGoToFirst,
   onNavigate,
-}: ExportDialogProps) {
-  const reviewState = state ?? reviewStateProp;
-  const activeState = reviewState ?? EMPTY_REVIEW_STATE;
+}: ExportPanelProps) {
   const [uncontrolledFormat, setUncontrolledFormat] = useState<ExportFormat>(initialFormat);
-  const controlledNote = overallNote;
-  const [uncontrolledNote, setUncontrolledNote] = useState(clipNote(activeState.overallNote));
+  const [uncontrolledNote, setUncontrolledNote] = useState(clipNote(reviewState.overallNote));
   const [status, setStatus] = useState('');
+  // True from the first keystroke until the note is handed to the review.
+  const noteDirty = useRef(false);
   const [previewElement, setPreviewElement] = useState<HTMLTextAreaElement | null>(null);
   const [copyFallbackElement, setCopyFallbackElement] = useState<HTMLTextAreaElement | null>(null);
   const selectedFormat = format ?? uncontrolledFormat;
-  const timestamp = defaultTime(generatedAt, time);
-  const note = controlledNote === undefined ? uncontrolledNote : clipNote(controlledNote);
-  const exportState: ReviewState = { ...activeState, overallNote: note };
+  const note = overallNote === undefined ? uncontrolledNote : clipNote(overallNote);
+  const preview = useExportPreview({
+    reviewState,
+    note,
+    files,
+    flags,
+    warnings,
+    format: selectedFormat,
+    timestamp: generatedAt ?? time ?? '',
+  });
 
   useEffect(() => {
-    if (controlledNote === undefined) {
-      setUncontrolledNote(clipNote(activeState.overallNote));
+    if (overallNote === undefined) {
+      setUncontrolledNote(clipNote(reviewState.overallNote));
+      noteDirty.current = false;
     }
-  }, [activeState.overallNote, controlledNote]);
-
-  const preview = useMemo(() => {
-    const input = normalizeExportInput(exportState, files, flags, warnings, timestamp);
-    return selectedFormat === 'agent-feedback'
-      ? generateAgentFeedback(input)
-      : generateMarkdownSummary(input);
-  }, [exportState, files, flags, selectedFormat, timestamp, warnings]);
-
-  const filename = useMemo(() => {
-    const kind: ExportFilenameKind =
-      selectedFormat === 'agent-feedback' ? 'agent-feedback' : 'summary';
-    return exportFilename(kind, activeState.label, activeState.round, timestamp);
-  }, [activeState.label, activeState.round, selectedFormat, timestamp]);
-
-  const warningsToShow = useMemo<readonly ExportWarning[]>(() => {
-    const entries = exportEntries(
-      normalizeExportInput(exportState, files, flags, warnings, timestamp),
-    );
-    const stats = selectReviewStats(files, activeState);
-    const rejectedWithoutComment = entries.filter(
-      (entry) => entry.review.decision === 'rejected' && !/\S/u.test(entry.review.comment),
-    ).length;
-    const redactions = countRedactions(exportState, files, flags, warnings);
-    const allWarnings: ExportWarning[] = [
-      { target: 'pending', label: 'Pending hunks', count: stats.pending },
-      {
-        target: 'rejected-comment',
-        label: 'Rejected hunks without a comment',
-        count: rejectedWithoutComment,
-      },
-      { target: 'parse-notes', label: 'Parse notes', count: warnings.length },
-      { target: 'redactions', label: 'Redactions applied', count: redactions },
-    ];
-    return allWarnings.filter((warning) => warning.count > 0);
-  }, [exportState, files, flags, timestamp, warnings]);
+  }, [reviewState.overallNote, overallNote]);
 
   function chooseFormat(next: ExportFormat) {
     if (format === undefined) {
@@ -202,70 +128,54 @@ export function ExportDialog({
 
   function changeOverallNote(value: string) {
     const clipped = clipNote(value);
-    if (controlledNote === undefined) {
+    if (overallNote === undefined) {
       setUncontrolledNote(clipped);
     }
+    noteDirty.current = true;
     onOverallNoteChange?.(clipped);
   }
 
-  async function copyPreview() {
+  function commitOverallNote() {
+    if (!noteDirty.current) {
+      return;
+    }
+    noteDirty.current = false;
+    onOverallNoteCommit?.(note);
+  }
+
+  async function tryCopy(): Promise<boolean> {
     try {
       if (onCopy !== undefined) {
-        await onCopy(preview);
-        setStatus('Copied export to clipboard.');
-        return;
+        await onCopy(preview.text);
+        return true;
       }
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText !== undefined) {
-        try {
-          await navigator.clipboard.writeText(preview);
-          setStatus('Copied export to clipboard.');
-          return;
-        } catch {
-          // Continue through the browser-compatible selection fallback.
-        }
-      }
-      if (copyFallbackElement !== null && fallbackCopy(copyFallbackElement)) {
-        setStatus('Copied export to clipboard.');
-      } else {
-        previewElement?.focus();
-        previewElement?.select();
-        setStatus(
-          "Couldn't copy automatically. The text is selected: press Ctrl+C (Cmd+C on Mac).",
-        );
-      }
+      return await copyText(preview.text, copyFallbackElement);
     } catch {
-      previewElement?.focus();
-      previewElement?.select();
-      setStatus("Couldn't copy automatically. The text is selected: press Ctrl+C (Cmd+C on Mac).");
+      return false;
     }
+  }
+
+  async function copyPreview() {
+    if (await tryCopy()) {
+      setStatus(COPIED_MESSAGE);
+      return;
+    }
+    previewElement?.focus();
+    previewElement?.select();
+    setStatus(SELECT_MANUALLY_MESSAGE);
   }
 
   async function downloadPreview() {
     try {
       if (onDownload !== undefined) {
-        await onDownload(preview, filename);
-        setStatus('Download started.');
+        await onDownload(preview.text, preview.filename);
+      } else if (!downloadText(preview.text, preview.filename)) {
+        setStatus(DOWNLOAD_BLOCKED_MESSAGE);
         return;
       }
-      if (
-        typeof Blob === 'undefined' ||
-        typeof URL === 'undefined' ||
-        typeof URL.createObjectURL !== 'function'
-      ) {
-        setStatus('If nothing downloaded, your browser may be blocking it. Use Copy instead.');
-        return;
-      }
-      const url = URL.createObjectURL(new Blob([preview], { type: 'text/markdown;charset=utf-8' }));
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      anchor.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-      }, 1_000);
-      setStatus('Download started.');
+      setStatus(DOWNLOAD_STARTED_MESSAGE);
     } catch {
-      setStatus('If nothing downloaded, your browser may be blocking it. Use Copy instead.');
+      setStatus(DOWNLOAD_BLOCKED_MESSAGE);
     }
   }
 
@@ -276,87 +186,35 @@ export function ExportDialog({
     }
   }
 
-  if (reviewState === undefined) {
-    return (
-      <section className="dialog-content" aria-labelledby="export-dialog-title">
-        <h2 id="export-dialog-title">Export review</h2>
-        <p>No review is loaded.</p>
-      </section>
-    );
-  }
-
   return (
-    <section className="dialog-content" aria-labelledby="export-dialog-title">
-      <header className="dialog-header">
+    <div className="dialog-content">
+      <div className="dialog-header">
         <div>
-          <h2 id="export-dialog-title">Export review</h2>
+          <h2 id={DIALOG_TITLE_IDS.export}>Export review</h2>
           <p>Choose an export for a human reviewer or the coding agent.</p>
         </div>
         {onClose !== undefined ? (
-          <button type="button" className="button button-secondary" onClick={onClose}>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => {
+              commitOverallNote();
+              onClose();
+            }}
+          >
             Close
           </button>
         ) : null}
-      </header>
+      </div>
 
-      <fieldset>
-        <legend>Export format</legend>
-        <label>
-          <input
-            type="radio"
-            name="export-format"
-            value="agent-feedback"
-            checked={selectedFormat === 'agent-feedback'}
-            onChange={() => {
-              chooseFormat('agent-feedback');
-            }}
-          />
-          Agent feedback
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="export-format"
-            value="summary"
-            checked={selectedFormat === 'summary'}
-            onChange={() => {
-              chooseFormat('summary');
-            }}
-          />
-          Markdown summary
-        </label>
-      </fieldset>
+      <FormatFieldset selected={selectedFormat} onChoose={chooseFormat} />
 
-      <label htmlFor="export-overall-note">Overall note</label>
-      <textarea
-        id="export-overall-note"
-        value={note}
-        onChange={(event) => {
-          changeOverallNote(event.currentTarget.value);
-        }}
-        maxLength={LIMITS.maxOverallNoteChars}
-        rows={4}
-        spellCheck
-      />
+      <OverallNoteField value={note} onChange={changeOverallNote} onCommit={commitOverallNote} />
 
-      <label htmlFor="export-preview">Export preview</label>
-      <textarea
-        id="export-preview"
-        aria-label="Export preview"
-        ref={setPreviewElement}
-        value={preview}
-        readOnly
-        spellCheck={false}
-        rows={18}
-      />
-      <textarea
-        ref={setCopyFallbackElement}
-        value={preview}
-        readOnly
-        hidden
-        tabIndex={-1}
-        aria-hidden="true"
-        aria-label="Copy fallback"
+      <PreviewFields
+        text={preview.text}
+        onPreviewElement={setPreviewElement}
+        onFallbackElement={setCopyFallbackElement}
       />
 
       <div className="button-row">
@@ -372,30 +230,9 @@ export function ExportDialog({
         </button>
       </div>
 
-      {warningsToShow.length > 0 ? (
-        <aside aria-label="Export notes">
-          <h3>Before you send it</h3>
-          <ul>
-            {warningsToShow.map((warning) => (
-              <li key={warning.target}>
-                <span>
-                  {warning.label}: {warning.count}
-                </span>{' '}
-                <button
-                  type="button"
-                  onClick={() => {
-                    goToFirst(warning.target);
-                  }}
-                >
-                  Go to first
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-      ) : null}
+      <ExportNotes notes={preview.notes} onGoToFirst={goToFirst} />
 
       <p aria-live="polite">{status}</p>
-    </section>
+    </div>
   );
 }

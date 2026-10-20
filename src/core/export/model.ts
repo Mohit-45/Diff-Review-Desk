@@ -27,12 +27,8 @@ export type NormalizedExportInput = {
   readonly time: string;
 };
 
-function own<T extends object>(object: T, key: PropertyKey): boolean {
-  return Object.prototype.hasOwnProperty.call(object, key);
-}
-
 function reviewFor(state: ReviewState, hunk: Hunk): HunkReview {
-  if (own(state.hunks, hunk.id)) {
+  if (Object.hasOwn(state.hunks, hunk.id)) {
     const review = state.hunks[hunk.id];
     if (review !== undefined) {
       return review;
@@ -108,6 +104,34 @@ export function normalizeExportInput(
   return { state: first, files, flags, warnings, label: first.label, time };
 }
 
+/**
+ * Positional arguments after the review state. A string in the warnings slot is
+ * the generation time, which keeps the shorter `(state, files, flags, time)` form working.
+ */
+export type PositionalExportArgs = [
+  files?: readonly DiffFile[],
+  flags?: readonly Flag[],
+  warnings?: readonly ParseWarning[] | readonly string[] | string,
+  time?: string,
+];
+
+export function exportInputFromArgs(
+  first: ExportInput | ReviewState,
+  parts: PositionalExportArgs,
+): NormalizedExportInput {
+  const files = parts[0] ?? [];
+  const flags = parts[1] ?? [];
+  const warnings = parts[2] ?? [];
+  const time = parts[3] ?? '';
+  return normalizeExportInput(
+    first,
+    files,
+    flags,
+    typeof warnings === 'string' ? [] : warnings,
+    typeof warnings === 'string' ? warnings : time,
+  );
+}
+
 export function decisionCounts(entries: readonly ExportEntry[]): {
   readonly approved: number;
   readonly rejected: number;
@@ -141,6 +165,6 @@ export function warningText(warning: ParseWarning | string): string {
   if (typeof warning === 'string') {
     return warning;
   }
-  const count = warning.count > 1 ? ` (${warning.count})` : '';
+  const count = warning.count > 1 ? ` (${String(warning.count)})` : '';
   return `${warning.code}${count}: ${warning.message}`;
 }

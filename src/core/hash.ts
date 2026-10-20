@@ -44,7 +44,7 @@ export function hunkHash(lines: readonly DiffLine[]): string {
 export const hashHunk = hunkHash;
 
 export function fileIdForPath(displayPath: string, occurrence = 1): string {
-  const suffix = occurrence > 1 ? `~${occurrence}` : '';
+  const suffix = occurrence > 1 ? `~${String(occurrence)}` : '';
   return `f${h(displayPath)}${suffix}`;
 }
 
@@ -52,7 +52,7 @@ export const makeFileId = fileIdForPath;
 export const fileId = fileIdForPath;
 
 export function hunkIdForHash(fileId: string, hash: string, occurrence = 1): string {
-  const suffix = occurrence > 1 ? `#${occurrence}` : '';
+  const suffix = occurrence > 1 ? `#${String(occurrence)}` : '';
   return `${fileId}:${hash}${suffix}`;
 }
 

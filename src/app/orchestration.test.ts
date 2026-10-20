@@ -177,7 +177,9 @@ describe('app orchestration', () => {
       await Promise.resolve();
       return { ok: true as const, value: 'first' };
     });
-    const second = latestOnly(generation, async () => ({ ok: true as const, value: 'second' }));
+    const second = latestOnly(generation, () =>
+      Promise.resolve({ ok: true as const, value: 'second' }),
+    );
     expect(await second).toEqual({ ok: true, value: 'second' });
     expect(await first).toMatchObject({ ok: false, error: { code: 'stale-load' } });
   });

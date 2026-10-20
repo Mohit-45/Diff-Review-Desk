@@ -1,25 +1,26 @@
 import type { RiskRule } from '../config';
 import {
-  dangerousShell,
-  evaluateDependencyAdded,
-  dependencyLine,
-  disabledTest,
-  disabledTls,
-  elisionMarker,
   evaluateBinary,
   evaluateCiContainer,
+  evaluateDependencyAdded,
   evaluateFileDeleted,
   evaluateFileMode,
   evaluateHiddenUnicode,
+  evaluateLine,
   evaluateSecretAssignment,
   evaluateSecretKnownToken,
   evaluateSensitiveFile,
   evaluateTestAssertionRemoved,
   evaluateTestFileDeleted,
-  evaluateLine,
+} from './matchers';
+import {
+  dangerousShell,
+  disabledTest,
+  disabledTls,
+  elisionMarker,
   placeholder,
   suppression,
-} from './matchers';
+} from './lineTests';
 
 export const P0_RULES: readonly RiskRule[] = [
   {
@@ -68,8 +69,7 @@ export const P0_RULES: readonly RiskRule[] = [
     title: 'Hidden Unicode or control character',
     why: 'Added text or a changed path contains a character that can be visually hidden.',
     prefilter: [],
-    pattern:
-      /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2069\ufeff]/u,
+    pattern: /[\p{Cc}\u200b-\u200f\u2028\u2029\u202a-\u202e\u2060-\u2069\ufeff]/u,
     scanWholeLine: true,
     evaluate: evaluateHiddenUnicode,
   },

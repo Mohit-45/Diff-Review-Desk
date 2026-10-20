@@ -36,7 +36,7 @@ export function exportFilename(
 ): string {
   const prefix = kind === 'agent-feedback' ? 'agent-feedback' : 'review';
   const safeRound = Number.isFinite(round) ? Math.max(0, Math.trunc(round)) : 0;
-  return `${prefix}-${filenameSlug(label)}-r${safeRound}-${timestamp(iso)}.md`;
+  return `${prefix}-${filenameSlug(label)}-r${String(safeRound)}-${timestamp(iso)}.md`;
 }
 
 export const makeFilename = exportFilename;

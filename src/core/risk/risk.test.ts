@@ -213,7 +213,7 @@ describe('P0 registry and deterministic analysis', () => {
   it('caps line references at twenty and masks sensitive evidence', () => {
     const file = makeFile('.env', {
       status: 'added',
-      added: Array.from({ length: 24 }, (_, index) => `KEY_${index}=${varied(10)}`),
+      added: Array.from({ length: 24 }, (_, index) => `KEY_${String(index)}=${varied(10)}`),
     });
     const flag = analyze([file]).flags.find(
       (candidate) => candidate.ruleId === 'sensitive-file-added',

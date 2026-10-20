@@ -7,6 +7,7 @@ import {
   createStorageAdapter,
   type StorageAreaLike,
 } from './adapter';
+import { throwForeign } from './areaFixtures';
 
 const id = 'f00000000001:00000000001';
 
@@ -32,17 +33,17 @@ class ThrowingArea extends MemoryStorageArea {
 
   override getItem(key: string): string | null {
     if (this.failure === 'security') {
-      throw { name: 'SecurityError' };
+      throwForeign({ name: 'SecurityError' });
     }
     return super.getItem(key);
   }
 
   override setItem(key: string, value: string): void {
     if (this.failure === 'security') {
-      throw { name: 'SecurityError' };
+      throwForeign({ name: 'SecurityError' });
     }
     if (key.startsWith(DIFF_KEY_PREFIX)) {
-      throw { name: 'QuotaExceededError' };
+      throwForeign({ name: 'QuotaExceededError' });
     }
     super.setItem(key, value);
   }
@@ -51,9 +52,9 @@ class ThrowingArea extends MemoryStorageArea {
 class QuotaEveryWriteArea extends MemoryStorageArea {
   readonly calls: string[] = [];
 
-  override setItem(key: string, value: string): void {
+  override setItem(key: string): void {
     this.calls.push(`set:${key}`);
-    throw { name: 'QuotaExceededError' };
+    throwForeign({ name: 'QuotaExceededError' });
   }
 
   override removeItem(key: string): void {

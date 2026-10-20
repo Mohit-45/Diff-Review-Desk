@@ -4,6 +4,8 @@
  * renderers.
  */
 
+import { HIDDEN_SET } from '../risk/hidden';
+
 export type EscapeOptions = {
   /** Keep line feeds and tabs as layout whitespace when true. */
   readonly multiline?: boolean;
@@ -11,56 +13,16 @@ export type EscapeOptions = {
   readonly singleLine?: boolean;
 };
 
-const CONTROL_MIN = 0x00;
-const CONTROL_MAX = 0x1f;
-const C1_MIN = 0x7f;
-const C1_MAX = 0x9f;
+// Spec section 9 also names these general categories for outgoing text; the
+// hidden-character definition itself is the shared HIDDEN_SET.
+const CONTROL_OR_SEPARATOR = /^[\p{Cc}\p{Zl}\p{Zp}]$/u;
 
-function isFormatCharacter(codePoint: number): boolean {
-  return /\p{Cf}/u.test(String.fromCodePoint(codePoint));
-}
-
-/** The export definition of HIDDEN_SET (no visual/emoji exemptions apply). */
-export function isHiddenCodePoint(codePoint: number): boolean {
-  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-    return false;
+/** TAB and LF are layout whitespace in multi-line fields and escaped in single-line ones. */
+function shouldEscape(character: string, codePoint: number, singleLine: boolean): boolean {
+  if (codePoint === 0x09 || codePoint === 0x0a) {
+    return singleLine;
   }
-  return (
-    (codePoint >= 0x202a && codePoint <= 0x202e) ||
-    (codePoint >= 0x2066 && codePoint <= 0x2069) ||
-    (codePoint >= 0x200b && codePoint <= 0x200d) ||
-    (codePoint >= 0x2060 && codePoint <= 0x2064) ||
-    codePoint === 0xfeff ||
-    codePoint === 0x00ad ||
-    codePoint === 0x034f ||
-    codePoint === 0x115f ||
-    codePoint === 0x1160 ||
-    codePoint === 0x17b4 ||
-    codePoint === 0x17b5 ||
-    codePoint === 0x180e ||
-    codePoint === 0x2800 ||
-    codePoint === 0x3164 ||
-    codePoint === 0xffa0 ||
-    (codePoint >= 0xfff9 && codePoint <= 0xfffb) ||
-    (codePoint >= 0xe0000 && codePoint <= 0xe007f) ||
-    (codePoint >= 0xe0100 && codePoint <= 0xe01ef) ||
-    codePoint === 0x2028 ||
-    codePoint === 0x2029 ||
-    codePoint === 0x0085 ||
-    isFormatCharacter(codePoint) ||
-    (codePoint >= CONTROL_MIN && codePoint <= CONTROL_MAX) ||
-    (codePoint >= C1_MIN && codePoint <= C1_MAX)
-  );
-}
-
-function shouldEscape(codePoint: number, singleLine: boolean): boolean {
-  if (isHiddenCodePoint(codePoint)) {
-    return !(codePoint === 0x09 || codePoint === 0x0a) || singleLine;
-  }
-
-  // U+2028/U+2029 are included above, but this explicit branch documents the
-  // line-separator requirement and protects the behavior if the set changes.
-  return codePoint === 0x2028 || codePoint === 0x2029;
+  return HIDDEN_SET.has(codePoint) || CONTROL_OR_SEPARATOR.test(character);
 }
 
 export function escapedCodePoint(codePoint: number): string {
@@ -86,7 +48,10 @@ export function escapeOutgoing(value: string, options: EscapeOptions | boolean =
     }
     // A lone UTF-16 surrogate is not a printable Unicode scalar.  Escaping it
     // also guarantees that clipping never leaves an invalid surrogate behind.
-    if ((codePoint >= 0xd800 && codePoint <= 0xdfff) || shouldEscape(codePoint, singleLine)) {
+    if (
+      (codePoint >= 0xd800 && codePoint <= 0xdfff) ||
+      shouldEscape(character, codePoint, singleLine)
+    ) {
       result += escapedCodePoint(codePoint);
     } else {
       result += character;
@@ -95,7 +60,7 @@ export function escapeOutgoing(value: string, options: EscapeOptions | boolean =
   return result;
 }
 
-function longestBacktickRun(value: string): number {
+export function longestBacktickRun(value: string): number {
   let longest = 0;
   let current = 0;
   for (const character of value) {
