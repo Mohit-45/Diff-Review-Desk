@@ -1,9 +1,13 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DiffFile, Hunk, KeymapRow, Prefs, ReviewState } from '../../core/types';
 import { ExportDialog } from './ExportDialog';
 import { HelpDialog } from './HelpDialog';
 import { SettingsDialog } from './SettingsDialog';
+
+afterEach(() => {
+  cleanup();
+});
 
 const SECRET = ['sk', 'live', '1234567890abcdef'].join('_');
 

@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DiffFile, Flag, Hunk, ReviewState } from '../../core/types';
 import { FileList } from './FileList';
 import { DEFAULT_REVIEW_FILTERS, Filters, filterFiles, type ReviewFilters } from './Filters';
 import { ReviewRail } from './ReviewRail';
+
+afterEach(() => {
+  cleanup();
+});
 
 function makeHunk(id: string, fileId: string, index: number): Hunk {
   return {

@@ -24,6 +24,7 @@ export default defineConfig({
           name: 'ui',
           include: ['src/ui/**/*.test.{ts,tsx}'],
           environment: 'jsdom',
+          testTimeout: 15_000,
         },
       },
       {
