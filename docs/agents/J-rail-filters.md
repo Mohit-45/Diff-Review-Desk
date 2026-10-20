@@ -1,5 +1,8 @@
 # J — Rail, progress and filters
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`.
+
 Task id: T7. Build review rail components: progress strip, changed-files list,
 filters and visible hunk/file navigation controls. Exact write-set:
 `src/ui/components/ReviewRail.tsx`, `src/ui/components/Filters.tsx`,

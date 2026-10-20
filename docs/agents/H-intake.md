@@ -1,5 +1,8 @@
 # H — Intake and samples
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`.
+
 Task id: T5. Build the P0 landing intake controls and built-in sample data for
 Diff Review Desk, using the current parser/open contracts. Exact write-set:
 `src/ui/screens/Landing.tsx`, `src/ui/components/LoadDialog.tsx`,

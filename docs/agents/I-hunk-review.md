@@ -1,5 +1,8 @@
 # I — Hunk review components
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`.
+
 Task id: T6. Build review display components: SafeText visual segments, icon
 set, hunk card, unified diff table, flags/disclosure and comment editor. Exact
 write-set: `src/ui/components/SafeText.tsx`, `src/ui/components/HunkCard.tsx`,

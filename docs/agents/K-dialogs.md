@@ -1,5 +1,8 @@
 # K — Export, help and settings dialogs
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`. P1/P2 dialog content was not built.
+
 Task id: T8. Build dialog contents for Export, keyboard help and Settings,
 without owning dialog lifecycle or App integration. Exact write-set:
 `src/ui/components/ExportDialog.tsx`, `src/ui/components/HelpDialog.tsx`,

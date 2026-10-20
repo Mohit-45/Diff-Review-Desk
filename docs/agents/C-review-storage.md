@@ -1,5 +1,8 @@
 # C — Review, storage and app core
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`.
+
 Task id: T3. Implement pure review state/history/selectors/carry-over, the
 storage validator/adapter and plain decode/open/persist/clear orchestration from
 the approved SPEC.md. Work only in this exact write-set:

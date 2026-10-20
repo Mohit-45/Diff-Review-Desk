@@ -1,5 +1,8 @@
 # Demo script
 
+Live demo: <https://mohit-45.github.io/Diff-Review-Desk/>. Recorded media is linked
+from the repository README.
+
 The eleven rows below are replayed by `src/ui/journey.carryover.test.tsx`
 (`DEMO_ROWS`), so the table and the test must change together. Start on
 `Sample: agent run 1` with focus on hunk 1. `a` approves and advances; `r` opens

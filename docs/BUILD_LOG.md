@@ -1,5 +1,20 @@
 # Build log
 
+## Current submission status — 2026-10-20
+
+The historical entries below describe the earlier OmniRush/repair sessions. The
+code was last verified on `main` at commit `168694c`, and GitHub Actions run
+[39408465499](https://github.com/Mohit-45/Diff-Review-Desk/actions/runs/39408465499)
+is green for both `verify` and `docker`.
+
+- `npm ci && npm run check` passes on Node 22.19.0.
+- The suite contains 100 test files and 1,732 passing tests.
+- Coverage is 97.31% statements and 92% branches.
+- The Docker image build, offline test and production server smoke check pass in CI.
+- The deployed site is <https://mohit-45.github.io/Diff-Review-Desk/>.
+- Independent spec-derived parser/security suites and an automated spec-id
+  traceability check were not built.
+
 ## Approval state
 
 M0 is now authorised by the user. The user requested nvm for Node 22.19.0 and

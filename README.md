@@ -32,6 +32,17 @@ npm run build
 npm start
 ```
 
+## Live demo
+
+The published static build is available at
+<https://mohit-45.github.io/Diff-Review-Desk/>. It runs entirely in the browser;
+the repository and deployed page make no backend or network API calls.
+
+## Demo media
+
+- [1440×900 review screenshot](artifacts/diff-review-desk-1440x900.png)
+- [Narrated feature tour](https://youtu.be/VpY9lKlSsjQ)
+
 ## Test
 
 ```sh
@@ -54,10 +65,10 @@ docker build -t diff-review-desk .
 docker run --rm --network none diff-review-desk npm test
 ```
 
-The image runs as the non-root `node` user. On 2026-10-20 the build, the offline
-`npm test` (100 files, 1,732 tests) and a detached start with `-p 4173:4173` plus a
-`curl` for `id="root"` all succeeded locally on Docker 29.6.2 (linux/arm64), on the
-final tree of that day. The GitHub run of the same steps is the user's to confirm.
+The image runs as the non-root `node` user. GitHub Actions run
+[39408465499](https://github.com/Mohit-45/Diff-Review-Desk/actions/runs/39408465499)
+verified the image build, the offline `npm test` run and a detached server check for
+`id="root"` on 2026-10-20.
 
 ## 90-second walkthrough
 
@@ -198,6 +209,7 @@ syntax highlighting and Web Workers.
   hunks, as one undo step.
 - There is no bulk approve; the 'bulk-ineligible file' signal from a throwing rule
   has nothing to attach to.
+- Independent spec-derived test suites and an automated spec-id traceability check were not built.
 - Manual checks that cannot run in jsdom are listed in `docs/MANUAL_QA.md`.
 
 ## Static deploy

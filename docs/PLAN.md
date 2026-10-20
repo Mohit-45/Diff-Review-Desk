@@ -1,6 +1,16 @@
 # Approval plan
 
-Status: planning only; implementation waits for OK and the blocking confirmations.
+Status: archived execution plan. P0 implementation and verification are complete;
+P1/P2 were not built.
+
+## Current outcome
+
+The plan was executed through the P0 review loop: intake, parsing, risk analysis,
+keyboard review, persistence, carry-over, exports, accessibility-oriented UI and
+offline CI/Docker verification. The live build is at
+<https://mohit-45.github.io/Diff-Review-Desk/>. The independent parser/security
+spec-derived suites and automated spec-id traceability check were deliberately not
+built in the remaining time.
 
 ## Architecture and tree
 

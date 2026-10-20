@@ -1,5 +1,9 @@
 # A1 — Tier-A parser and hash
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`. The independent parser spec-derived suite was intentionally
+deferred for this submission.
+
 Task id: T1. Implement the tier-A hand-written unified-diff parser and identity
 helpers against the approved SPEC.md. Work only in this exact write-set:
 `src/core/parser/**`, `src/core/hash.ts`, `fixtures/diffs/**` for tier-A fixtures,

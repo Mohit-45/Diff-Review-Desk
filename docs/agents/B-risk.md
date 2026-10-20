@@ -1,5 +1,8 @@
 # B — P0 risk engine and masking
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`. P1 risk rules were not built.
+
 Task id: T2. Implement deterministic P0 risk analysis, secret spans, masking
 and hidden-Unicode visualisation against the approved SPEC.md. Work only in this
 exact write-set: `src/core/risk/**` and risk tests under that directory. Do not

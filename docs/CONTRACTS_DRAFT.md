@@ -1,9 +1,9 @@
 # Draft for src/core/types.ts
 
-Planning document only; no source file has been created. Base fields follow
-SPEC section 6 with readonly properties and collections. Closed warning and P0
-rule unions follow sections 7 and 8. The draft becomes a source contract at M0,
-after approval; later non-optional contract changes require another approval.
+Historical contract draft. The corresponding source contract is implemented in
+`src/core/types.ts`; this file remains a readable record of the M0 contract
+decisions. Base fields follow SPEC section 6 with readonly properties and
+collections. Closed warning and P0 rule unions follow sections 7 and 8.
 
 ```ts
 export type Result<T, E> =
@@ -270,7 +270,10 @@ export type KeymapRow = {
 };
 ```
 
-## Boundary decisions to finish at M0
+## Boundary decisions resolved at M0
+
+The independent spec-derived parser/security suites and automated spec-id
+traceability check were not built for this submission.
 
 - `lineClasses` counts partition every pipeline input line exactly once.
   `orphanLines` is a diagnostic count, not another partition bucket.

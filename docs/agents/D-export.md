@@ -1,5 +1,8 @@
 # D — Redacted exporters
 
+Status: Implemented in the current P0 tree; verification is recorded in
+`docs/BUILD_LOG.md`.
+
 Task id: T4. Implement deterministic agent-feedback and Markdown-summary
 exporters, outgoing escaping, redaction, excerpts, range labels and filename
 slugs from the approved SPEC.md. Work only in this exact write-set:
